@@ -510,9 +510,11 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		defaultVCPUs = 1
 	}
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
 
 	vmmArgs := types.ExecArgs{
 		ContainerID:   u.State.ID,
+		SocketPath:    socketPath,
 		UnikernelPath: unikernelPath,
 		InitrdPath:    initrdPath,
 		Seccomp:       true, // Enable Seccomp by default
