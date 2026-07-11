@@ -498,10 +498,12 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		defaultVCPUs = 1
 	}
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
 
 	// ExecArgs
 	vmmArgs := types.ExecArgs{
 		ContainerID:   u.State.ID,
+		SocketPath:    socketPath,
 		UnikernelPath: unikernelPath,
 		InitrdPath:    initrdPath,
 		Seccomp:       true, // Enable Seccomp by default
