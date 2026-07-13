@@ -113,6 +113,11 @@ func (fc *Firecracker) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel
 	}
 	exArgs := []string{fc.Path(), "--api-sock", apiSockPath}
 	JSONConfigFile := filepath.Join("/tmp/", FCJsonFilename)
+	if args.BootMode == "config-file" {
+		// config-file-based: Firecracker boots itself from the JSON config file
+		// below; the socket stays open only for use after the guest is running.
+		cmdString += " --config-file " + JSONConfigFile
+	}
 	if !args.Seccomp {
 		exArgs = append(exArgs, "--no-seccomp")
 	}
