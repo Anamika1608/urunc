@@ -32,6 +32,17 @@ type DynamicNetwork struct {
 // FIXME: CUrrently only one tap device per netns can provide functional networking. We need to find a proper way to handle networking
 // for multiple unikernels in the same pod/network namespace.
 // See: https://github.com/urunc-dev/urunc/issues/13
+// HasNetwork checks, cheaply, whether a container network interface exists
+// in the current netns, without creating the tap device or doing any of the
+// other, more expensive setup NetworkSetup does.
+func (n DynamicNetwork) HasNetwork() (bool, error) {
+	_, err := discoverContainerIface()
+	if err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (n DynamicNetwork) NetworkSetup(uid uint32, gid uint32) (*UnikernelNetworkInfo, error) {
 	tapIndex, err := getTapIndex()
 	if err != nil {

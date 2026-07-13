@@ -287,6 +287,19 @@ func (u *Unikontainer) SetupNet() (types.NetDevParams, error) {
 	return netArgs, nil
 }
 
+// HasNetwork does a cheap check for whether this container has a network
+// interface to configure, without doing the more expensive tap device
+// creation and configuration that SetupNet does. It exists so callers can
+// learn this fact early, while the full SetupNet runs concurrently.
+func (u *Unikontainer) HasNetwork() (bool, error) {
+	networkType := u.getNetworkType()
+	netManager, err := network.NewNetworkManager(networkType)
+	if err != nil {
+		return false, fmt.Errorf("failed to create network manager for %s type: %v", networkType, err)
+	}
+	return netManager.HasNetwork()
+}
+
 // chooseRootfs determines the best rootfs configuration based on available options
 // Priority order:
 //  1. Initrd (if specified)
@@ -542,19 +555,45 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 
 	// handle network
-	netArgs, err := u.SetupNet()
-	if err != nil {
-		uniklog.Errorf("failed to setup network: %v", err)
-		return err
+	//
+	// For Firecracker's API-based boot mode, rootfs prep (below) only needs
+	// the cheap "does this container have a network interface" fact, not the
+	// fully finished network setup (see prepareMonRootfs's needsTAP argument
+	// below) - the expensive part of network setup (creating the tap device,
+	// TC rules, fetching interface info) doesn't need to block it. So in
+	// that case we run the real SetupNet concurrently with rootfs prep, and
+	// only wait for it once we actually need the resolved IP/gateway/MAC -
+	// which is right before unikernel.Init, since every supported unikernel
+	// type bakes the resolved network info into the guest's boot command
+	// line. For every other case, this stays exactly as sequential as today.
+	isAPIBoot := vmmType == string(hypervisors.FirecrackerVmm) && bootMode != "config-file"
+
+	var netArgs types.NetDevParams
+	var netSetupErr error
+	var netWG sync.WaitGroup
+	var withTUNTAP bool
+
+	if isAPIBoot {
+		hasNet, err := u.HasNetwork()
+		if err != nil {
+			uniklog.Errorf("failed to check for a container network: %v", err)
+			return err
+		}
+		withTUNTAP = hasNet
+		netWG.Add(1)
+		go func() {
+			defer netWG.Done()
+			netArgs, netSetupErr = u.SetupNet()
+		}()
+	} else {
+		netArgs, err = u.SetupNet()
+		if err != nil {
+			uniklog.Errorf("failed to setup network: %v", err)
+			return err
+		}
+		withTUNTAP = netArgs.IP != ""
 	}
 	metrics.Capture(m.TS16)
-	withTUNTAP := netArgs.IP != ""
-
-	// UnikernelParams
-	unikernelParams.Net = netArgs
-
-	// ExecArgs
-	vmmArgs.Net = netArgs
 
 	// guest rootfs
 	// block
@@ -682,6 +721,20 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 	vmmArgs.Sharedfs = sharedfsArgs
 
+	// If network setup is still running concurrently (isAPIBoot), this is
+	// where we actually need its result: every supported unikernel type
+	// bakes the resolved IP/gateway/MAC into the guest's boot command line
+	// inside Init below.
+	if isAPIBoot {
+		netWG.Wait()
+		if netSetupErr != nil {
+			uniklog.Errorf("failed to setup network: %v", netSetupErr)
+			return netSetupErr
+		}
+	}
+	unikernelParams.Net = netArgs
+	vmmArgs.Net = netArgs
+
 	// unikernel
 	err = unikernel.Init(unikernelParams)
 	if errors.Is(err, unikernels.ErrUndefinedVersion) ||
@@ -764,6 +817,15 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	if err != nil {
 		uniklog.WithError(err).Error("failed to perform pre-exec setup")
 		return err
+	}
+
+	if isAPIBoot {
+		fc, ok := vmm.(*hypervisors.Firecracker)
+		if !ok {
+			return fmt.Errorf("boot_mode=api is only supported for the firecracker monitor")
+		}
+		uniklog.WithField("command", execCmd).Debug("Starting Firecracker as a supervised child, driving it over its control socket")
+		return fc.RunSocketBoot(vmmArgs, unikernel, execCmd)
 	}
 
 	// Execute the VMM using the command we built earlier.

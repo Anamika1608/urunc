@@ -15,11 +15,17 @@
 package hypervisors
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
 	"golang.org/x/sys/unix"
@@ -123,6 +129,31 @@ func (fc *Firecracker) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel
 		cmdString += " --no-seccomp"
 	}
 
+	FCConfig := buildFirecrackerConfig(args, ukernel)
+	FCConfigJSON, err := json.Marshal(FCConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Firecracker config: %w", err)
+	}
+	if err = os.WriteFile(JSONConfigFile, FCConfigJSON, 0o644); err != nil { //nolint: gosec
+		return nil, fmt.Errorf("failed to save Firecracker json config: %w", err)
+	}
+	vmmLog.WithField("Json", string(FCConfigJSON)).Debug("Firecracker json config")
+
+	exArgs := strings.Split(cmdString, " ")
+	return exArgs, nil
+}
+
+// PreExec performs pre-execution setup. Firecracker has no special pre-exec requirements.
+func (fc *Firecracker) PreExec(_ types.ExecArgs) error {
+	return nil
+}
+
+// buildFirecrackerConfig builds the microVM configuration from args and
+// ukernel. Used both to write the JSON config file (config-file-based boot)
+// and to drive the same configuration over the API socket (API-based boot),
+// so both paths always agree on what the guest actually gets configured
+// with.
+func buildFirecrackerConfig(args types.ExecArgs, ukernel types.Unikernel) *FirecrackerConfig {
 	// VM config for Firecracker
 	fcMem := DefaultMemory
 	if args.MemSizeB != 0 {
@@ -192,27 +223,96 @@ func (fc *Firecracker) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel
 		}
 	}
 
-	FCConfig := &FirecrackerConfig{
+	return &FirecrackerConfig{
 		Source:  FCSource,
 		Machine: FCMachine,
 		Drives:  FCDrives,
 		NetIfs:  FCNet,
 		VSock:   FCVSockDev,
 	}
-	FCConfigJSON, err := json.Marshal(FCConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal Firecracker config: %w", err)
-	}
-	if err = os.WriteFile(JSONConfigFile, FCConfigJSON, 0o644); err != nil { //nolint: gosec
-		return nil, fmt.Errorf("failed to save Firecracker json config: %w", err)
-	}
-	vmmLog.WithField("Json", string(FCConfigJSON)).Debug("Firecracker json config")
-
-	exArgs := strings.Split(cmdString, " ")
-	return exArgs, nil
 }
 
-// PreExec performs pre-execution setup. Firecracker has no special pre-exec requirements.
-func (fc *Firecracker) PreExec(_ types.ExecArgs) error {
-	return nil
+// RunSocketBoot starts Firecracker as a child process instead of replacing
+// the current process via exec. Since nothing here changes the process's
+// root (no SysProcAttr.Chroot is set), the child simply inherits whatever
+// confinement changeRoot already established on the caller earlier in Exec
+// (pivot_root or chroot, whichever the container spec calls for) - so it
+// ends up exactly as confined as the exec path would have made it, with no
+// separate confinement step needed here.
+//
+// It configures the guest over the API socket using the same config
+// BuildExecCmd would have written to a file, starts the guest, then
+// supervises the child until it exits: forwarding SIGTERM/SIGINT, and
+// exiting this process with the child's exit code once it's done, mirroring
+// the semantics syscall.Exec would have had.
+//
+// On success this function does not return: it calls os.Exit with the
+// child's exit status once the child exits. It returns an error only if
+// startup or configuration fails before the guest could ever run.
+func (fc *Firecracker) RunSocketBoot(args types.ExecArgs, ukernel types.Unikernel, execCmd []string) error {
+	cfg := buildFirecrackerConfig(args, ukernel)
+
+	cmd := exec.Command(execCmd[0], execCmd[1:]...) //nolint: gosec
+	cmd.Env = args.Environment
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start firecracker: %w", err)
+	}
+
+	socketPath := args.SocketPath
+	if socketPath == "" {
+		socketPath = filepath.Join("/tmp/", args.ContainerID+".sock")
+	}
+	client := newFirecrackerClient(socketPath)
+	ctx := context.Background()
+
+	if err := client.waitForSocket(5 * time.Second); err != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		return fmt.Errorf("firecracker socket never became ready: %w", err)
+	}
+	if err := client.configure(ctx, cfg); err != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		return fmt.Errorf("failed to configure firecracker over the socket: %w", err)
+	}
+	if err := client.startGuest(ctx); err != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		return fmt.Errorf("failed to start the guest: %w", err)
+	}
+
+	// Forward the signals containerd would send to stop the container.
+	// SIGKILL cannot be caught, so it is not listed here: if it arrives,
+	// this process dies immediately and the child is left running, a known
+	// gap for this bounded experiment, not yet handled.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig, ok := <-sigCh
+		if !ok {
+			return
+		}
+		if s, ok := sig.(syscall.Signal); ok {
+			_ = cmd.Process.Signal(s)
+		}
+	}()
+
+	waitErr := cmd.Wait()
+	signal.Stop(sigCh)
+	close(sigCh)
+
+	exitCode := 0
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			vmmLog.WithError(waitErr).Error("firecracker exited with an unexpected error")
+			exitCode = 1
+		}
+	}
+	os.Exit(exitCode)
+	return nil // unreachable
 }
