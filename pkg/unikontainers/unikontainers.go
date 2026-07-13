@@ -314,6 +314,19 @@ func SetupNet(networkType string, uid, gid uint32) (types.NetDevParams, error) {
 	return netArgs, nil
 }
 
+// HasNetwork does a cheap check for whether this container has a network
+// interface to configure, without doing the more expensive tap device
+// creation and configuration that SetupNet does. It exists so callers can
+// learn this fact early, while the full SetupNet runs concurrently.
+func (u *Unikontainer) HasNetwork() (bool, error) {
+	networkType := u.getNetworkType()
+	netManager, err := network.NewNetworkManager(networkType)
+	if err != nil {
+		return false, fmt.Errorf("failed to create network manager for %s type: %v", networkType, err)
+	}
+	return netManager.HasNetwork()
+}
+
 // chooseRootfs determines the best rootfs configuration based on available options
 // Priority order:
 //  1. Initrd (if specified)
@@ -639,23 +652,67 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 
 	// handle network
-	netArgs, err := SetupNet(u.getNetworkType(), u.Spec.Process.User.UID, u.Spec.Process.User.GID)
-	if err != nil {
-		uniklog.Errorf("failed to setup network: %v", err)
-		return err
+	//
+	// For Firecracker's API-based boot mode, the monitor rootfs setup below
+	// only needs the cheap "does this container have a network interface"
+	// fact, not the fully finished network setup - the expensive part
+	// (creating the tap device, TC rules, fetching interface info) doesn't
+	// need to block it. So in that case we run the real SetupNet
+	// concurrently with the rootfs setup, and only wait for it once we
+	// actually need the resolved IP/gateway/MAC - which is right before
+	// buildUnikernelCommand, since every supported unikernel type bakes the
+	// resolved network info into the guest's boot command line. For every
+	// other case, this stays exactly as sequential as before.
+	isAPIBoot := ms.MonitorType == string(hypervisors.FirecrackerVmm) && vmmArgs.BootMode != "config-file"
+
+	var netArgs types.NetDevParams
+	var netSetupErr error
+	var netWG sync.WaitGroup
+	var withTUNTAP bool
+
+	if isAPIBoot {
+		hasNet, err := u.HasNetwork()
+		if err != nil {
+			uniklog.Errorf("failed to check for a container network: %v", err)
+			return err
+		}
+		withTUNTAP = hasNet
+		netWG.Add(1)
+		go func() {
+			defer netWG.Done()
+			netArgs, netSetupErr = SetupNet(u.getNetworkType(), u.Spec.Process.User.UID, u.Spec.Process.User.GID)
+		}()
+	} else {
+		netArgs, err = SetupNet(u.getNetworkType(), u.Spec.Process.User.UID, u.Spec.Process.User.GID)
+		if err != nil {
+			uniklog.Errorf("failed to setup network: %v", err)
+			return err
+		}
+		withTUNTAP = netArgs.IP != ""
 	}
 	metrics.Capture(m.TS16)
-	withTUNTAP := netArgs.IP != ""
-	// SetupNet does not resolve DNS; carry the server resolved at spec build.
-	netArgs.DNSServer = ms.DNSServer
-	unikernelParams.Net = netArgs
-	vmmArgs.Net = netArgs
 
 	err = u.setupMonitorRootfs(rootfsParams.MonRootfs, monRes, withTUNTAP)
 	if err != nil {
 		return err
 	}
 	metrics.Capture(m.TS17)
+
+	// If network setup is still running concurrently (isAPIBoot), this is
+	// where we actually need its result: every supported unikernel type
+	// bakes the resolved IP/gateway/MAC into the guest's boot command line
+	// inside buildUnikernelCommand below.
+	if isAPIBoot {
+		netWG.Wait()
+		if netSetupErr != nil {
+			uniklog.Errorf("failed to setup network: %v", netSetupErr)
+			return netSetupErr
+		}
+	}
+	// SetupNet does not resolve DNS; carry the server resolved at spec build.
+	netArgs.DNSServer = ms.DNSServer
+	unikernelParams.Net = netArgs
+	vmmArgs.Net = netArgs
 
 	// vAccel setup
 	vAccelType, vAccelSocketPath, rpcAddress, err := resolveVAccelConfig(u.State.Annotations[annotHypervisor], u.State.Annotations)
@@ -764,6 +821,16 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	err = u.SendMessage(StartSuccess)
 	if err != nil {
 		return err
+	}
+
+	if isAPIBoot {
+		fc, ok := vmm.(*hypervisors.Firecracker)
+		if !ok {
+			return fmt.Errorf("boot_mode=api is only supported for the firecracker monitor")
+		}
+		metrics.Capture(m.TS18)
+		uniklog.WithField("command", execCmd).Debug("Starting Firecracker as a supervised child, driving it over its control socket")
+		return fc.RunSocketBoot(vmmArgs, unikernel, execCmd)
 	}
 
 	return execMonitor(metrics, vmm, vmmArgs, execCmd)
