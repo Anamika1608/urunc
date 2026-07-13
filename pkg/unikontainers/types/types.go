@@ -102,6 +102,7 @@ type UnikernelParams struct {
 type ExecArgs struct {
 	ContainerID   string   // The container ID
 	SocketPath    string   // Optional user-configured path for the monitor's control socket. Empty means the monitor uses its default.
+	BootMode      string   // "api" (default) drives the monitor over its control socket. "config-file" lets the monitor boot itself from a config file, socket only for later use.
 	Environment   []string // The environment variables of the monitor
 	Command       string   // The unikernel's command line
 	Seccomp       bool     // Enable or disable seccomp filters for the VMM
@@ -143,4 +144,5 @@ type MonitorConfig struct {
 	DataPath        string `toml:"data_path,omitempty"`   // Optional path to the hypervisor data files (e.g. qemu bios stuff)
 	Vhost           bool   `toml:"vhost,omitempty"`       // Optional: enable vhost for network performance optimization
 	SocketPath      string `toml:"socket_path,omitempty"` // Optional path for the monitor's control socket. If not specified, the monitor uses its default.
+	BootMode        string `toml:"boot_mode,omitempty"`   // Optional: "api" (default) or "config-file". Currently only used by Firecracker.
 }
