@@ -16,6 +16,7 @@ package unikontainers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -556,16 +557,21 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 
 	// handle network
 	//
-	// For Firecracker's API-based boot mode, rootfs prep (below) only needs
-	// the cheap "does this container have a network interface" fact, not the
-	// fully finished network setup (see prepareMonRootfs's needsTAP argument
-	// below) - the expensive part of network setup (creating the tap device,
-	// TC rules, fetching interface info) doesn't need to block it. So in
-	// that case we run the real SetupNet concurrently with rootfs prep, and
-	// only wait for it once we actually need the resolved IP/gateway/MAC -
-	// which is right before unikernel.Init, since every supported unikernel
-	// type bakes the resolved network info into the guest's boot command
-	// line. For every other case, this stays exactly as sequential as today.
+	// For Firecracker's API-based boot mode, the VMM is spawned right here,
+	// before any of the expensive setup work, and configured in stages while
+	// that work runs: machine-config immediately (it needs nothing but the
+	// spec), the network interface as soon as network setup finishes, and
+	// everything unikernel-dependent (drives, boot source) right after
+	// unikernel.Init. The guest itself is only started (InstanceStart) after
+	// the start-success handshake, preserving OCI start ordering.
+	//
+	// Rootfs prep (below) only needs the cheap "does this container have a
+	// network interface" fact, not the fully finished network setup (see
+	// prepareMonRootfs's needsTAP argument below), so the real SetupNet runs
+	// concurrently with rootfs prep, joined right before unikernel.Init,
+	// since every supported unikernel type bakes the resolved IP/gateway/MAC
+	// into the guest's boot command line. For every other case, this stays
+	// exactly as sequential as today.
 	isAPIBoot := vmmType == string(hypervisors.FirecrackerVmm) && bootMode != "config-file"
 
 	var netArgs types.NetDevParams
@@ -573,7 +579,33 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	var netWG sync.WaitGroup
 	var withTUNTAP bool
 
+	var fcSession *hypervisors.FirecrackerSession
+	fcHandedOff := false
+	defer func() {
+		// Any error return after the spawn must not leave the VMM child
+		// behind. Supervise never returns (os.Exit), so this only fires on
+		// error paths.
+		if fcSession != nil && !fcHandedOff {
+			fcSession.Kill()
+		}
+	}()
+	ctx := context.Background()
+
 	if isAPIBoot {
+		fc, ok := vmm.(*hypervisors.Firecracker)
+		if !ok {
+			return fmt.Errorf("boot_mode=api is only supported for the firecracker monitor")
+		}
+		fcSession, err = fc.SpawnSocketVMM(vmmArgs, procAttrs.UID, procAttrs.GID)
+		if err != nil {
+			uniklog.Errorf("failed to spawn firecracker: %v", err)
+			return err
+		}
+		if err = fcSession.ConfigureMachine(ctx, vmmArgs); err != nil {
+			uniklog.Errorf("failed to configure the machine over the socket: %v", err)
+			return err
+		}
+
 		hasNet, err := u.HasNetwork()
 		if err != nil {
 			uniklog.Errorf("failed to check for a container network: %v", err)
@@ -724,12 +756,17 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// If network setup is still running concurrently (isAPIBoot), this is
 	// where we actually need its result: every supported unikernel type
 	// bakes the resolved IP/gateway/MAC into the guest's boot command line
-	// inside Init below.
+	// inside Init below. The tap device exists from this point on, so the
+	// network interface is also sent to the VMM right away.
 	if isAPIBoot {
 		netWG.Wait()
 		if netSetupErr != nil {
 			uniklog.Errorf("failed to setup network: %v", netSetupErr)
 			return netSetupErr
+		}
+		if err = fcSession.ConfigureNetwork(ctx, netArgs); err != nil {
+			uniklog.Errorf("failed to configure the network over the socket: %v", err)
+			return err
 		}
 	}
 	unikernelParams.Net = netArgs
@@ -753,6 +790,16 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 
 	// ExecArgs
 	vmmArgs.Command = unikernelCmd
+
+	// Everything unikernel-dependent is known now, so it goes to the VMM
+	// before changeRoot below: the child kept the pre-pivot mount view, so
+	// ConfigureGuest prefixes the monitor rootfs onto the paths it sends.
+	if isAPIBoot {
+		if err = fcSession.ConfigureGuest(ctx, vmmArgs, unikernel, rootfsParams.MonRootfs); err != nil {
+			uniklog.Errorf("failed to configure the guest over the socket: %v", err)
+			return err
+		}
+	}
 
 	// pivot
 	_, err = findNS(u.Spec.Linux.Namespaces, specs.MountNamespace)
@@ -795,10 +842,15 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 
 	// Build the VMM command once and verify it can be constructed successfully.
 	// This ensures we don't report the container as started if command building fails.
-	execCmd, err := vmm.BuildExecCmd(vmmArgs, unikernel)
-	if err != nil {
-		uniklog.WithError(err).Error("failed to build VMM command")
-		return err
+	// For the API-based boot the VMM is already running and fully configured
+	// (the equivalent validation), so there is no command to build.
+	var execCmd []string
+	if !isAPIBoot {
+		execCmd, err = vmm.BuildExecCmd(vmmArgs, unikernel)
+		if err != nil {
+			uniklog.WithError(err).Error("failed to build VMM command")
+			return err
+		}
 	}
 
 	// Notify urunc start that the monitor is ready to execute.
@@ -820,12 +872,15 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 
 	if isAPIBoot {
-		fc, ok := vmm.(*hypervisors.Firecracker)
-		if !ok {
-			return fmt.Errorf("boot_mode=api is only supported for the firecracker monitor")
+		// The VMM is configured; boot the guest and hand this process over
+		// to supervising the child. This process must not exit before the
+		// child, since it is the container's init process.
+		if err = fcSession.StartGuest(ctx); err != nil {
+			uniklog.Errorf("failed to start the guest: %v", err)
+			return err
 		}
-		uniklog.WithField("command", execCmd).Debug("Starting Firecracker as a supervised child, driving it over its control socket")
-		return fc.RunSocketBoot(vmmArgs, unikernel, execCmd)
+		fcHandedOff = true
+		return fcSession.Supervise()
 	}
 
 	// Execute the VMM using the command we built earlier.

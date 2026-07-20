@@ -232,57 +232,150 @@ func buildFirecrackerConfig(args types.ExecArgs, ukernel types.Unikernel) *Firec
 	}
 }
 
-// RunSocketBoot starts Firecracker as a child process instead of replacing
-// the current process via exec. Since nothing here changes the process's
-// root (no SysProcAttr.Chroot is set), the child simply inherits whatever
-// confinement changeRoot already established on the caller earlier in Exec
-// (pivot_root or chroot, whichever the container spec calls for) - so it
-// ends up exactly as confined as the exec path would have made it, with no
-// separate confinement step needed here.
+// FirecrackerSession is a Firecracker child process being configured over its
+// API socket in stages, while the caller performs its own setup work between
+// the stages. Create it with SpawnSocketVMM, feed it configuration with the
+// Configure* methods as each piece becomes available, boot the guest with
+// StartGuest, then hand the calling process over with Supervise.
+type FirecrackerSession struct {
+	cmd    *exec.Cmd
+	client *firecrackerClient
+}
+
+// SpawnSocketVMM starts Firecracker as a child process with only its API
+// socket enabled, and establishes the single persistent connection all later
+// configuration stages use (it survives a later changeRoot; see
+// firecrackerClient).
 //
-// It configures the guest over the API socket using the same config
-// BuildExecCmd would have written to a file, starts the guest, then
-// supervises the child until it exits: forwarding SIGTERM/SIGINT, and
-// exiting this process with the child's exit code once it's done, mirroring
-// the semantics syscall.Exec would have had.
-//
-// On success this function does not return: it calls os.Exit with the
-// child's exit status once the child exits. It returns an error only if
-// startup or configuration fails before the guest could ever run.
-func (fc *Firecracker) RunSocketBoot(args types.ExecArgs, ukernel types.Unikernel, execCmd []string) error {
-	cfg := buildFirecrackerConfig(args, ukernel)
+// This is called early in Exec, before the monitor rootfs is prepared and
+// before changeRoot, so unlike the exec path the child keeps the caller's
+// current (pre-pivot) mount view for its lifetime. It does inherit the
+// sandbox's network namespace, which Exec has already joined. When uid/gid
+// are non-zero the child is started directly under that credential, since
+// the caller only drops its own privileges (setupUser) much later.
+func (fc *Firecracker) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*FirecrackerSession, error) {
+	socketPath := args.SocketPath
+	if socketPath == "" {
+		socketPath = filepath.Join("/tmp/", args.ContainerID+".sock")
+	}
+	execCmd := []string{fc.Path(), "--api-sock", socketPath}
+	if !args.Seccomp {
+		execCmd = append(execCmd, "--no-seccomp")
+	}
 
 	cmd := exec.Command(execCmd[0], execCmd[1:]...) //nolint: gosec
 	cmd.Env = args.Environment
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if uid != 0 || gid != 0 {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{Uid: uid, Gid: gid},
+		}
+	}
+	vmmLog.WithField("command", execCmd).Debug("starting Firecracker as a supervised child")
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start firecracker: %w", err)
+		return nil, fmt.Errorf("failed to start firecracker: %w", err)
 	}
 
-	socketPath := args.SocketPath
-	if socketPath == "" {
-		socketPath = filepath.Join("/tmp/", args.ContainerID+".sock")
-	}
 	client := newFirecrackerClient(socketPath)
-	ctx := context.Background()
+	if err := client.connect(5 * time.Second); err != nil {
+		s := &FirecrackerSession{cmd: cmd, client: client}
+		s.Kill()
+		return nil, fmt.Errorf("firecracker socket never became ready: %w", err)
+	}
+	return &FirecrackerSession{cmd: cmd, client: client}, nil
+}
 
-	if err := client.waitForSocket(5 * time.Second); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return fmt.Errorf("firecracker socket never became ready: %w", err)
+// ConfigureMachine sends the vCPU/memory configuration. Nothing but the
+// container spec is needed for this, so it is the first stage, sent right
+// after the spawn.
+func (s *FirecrackerSession) ConfigureMachine(ctx context.Context, args types.ExecArgs) error {
+	fcMem := DefaultMemory
+	if args.MemSizeB != 0 {
+		fcMem = bytesToMiB(args.MemSizeB)
+		if fcMem == 0 {
+			fcMem = DefaultMemory
+		}
 	}
-	if err := client.configure(ctx, cfg); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return fmt.Errorf("failed to configure firecracker over the socket: %w", err)
+	machine := FirecrackerMachine{
+		VcpuCount:       args.VCPUs,
+		MemSizeMiB:      fcMem,
+		Smt:             false,
+		TrackDirtyPages: false,
 	}
-	if err := client.startGuest(ctx); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		return fmt.Errorf("failed to start the guest: %w", err)
+	vmmLog.Debug("staged boot: sending machine-config")
+	return s.client.putMachineConfig(ctx, machine)
+}
+
+// ConfigureNetwork attaches the container's network interface. Firecracker
+// opens the tap device during this call, so it must only run once the
+// network setup that creates the tap has finished. No-op without a tap.
+func (s *FirecrackerSession) ConfigureNetwork(ctx context.Context, net types.NetDevParams) error {
+	if net.TapDev == "" {
+		return nil
+	}
+	iface := FirecrackerNet{
+		IfaceID:  "net1",
+		GuestMAC: net.MAC,
+		HostIF:   net.TapDev,
+	}
+	vmmLog.Debug("staged boot: sending network-interfaces")
+	return s.client.putNetworkIface(ctx, iface)
+}
+
+// ConfigureGuest sends everything that depends on unikernel.Init having run:
+// the block devices (their IDs/paths come from the unikernel's
+// MonitorBlockCli), the boot source (its boot args are the unikernel command
+// line, which bakes in the resolved network), and the vsock device if any.
+//
+// The child was spawned before changeRoot, so it resolves paths in the
+// pre-pivot mount view; monRootfs (the directory the caller will pivot into)
+// is therefore prefixed onto every path the child has to open.
+func (s *FirecrackerSession) ConfigureGuest(ctx context.Context, args types.ExecArgs, ukernel types.Unikernel, monRootfs string) error {
+	cfg := buildFirecrackerConfig(args, ukernel)
+
+	cfg.Source.ImagePath = filepath.Join(monRootfs, cfg.Source.ImagePath)
+	if cfg.Source.InitrdPath != "" {
+		cfg.Source.InitrdPath = filepath.Join(monRootfs, cfg.Source.InitrdPath)
+	}
+	for i := range cfg.Drives {
+		cfg.Drives[i].HostPath = filepath.Join(monRootfs, cfg.Drives[i].HostPath)
+	}
+	if cfg.VSock.UDSPath != "" {
+		cfg.VSock.UDSPath = filepath.Join(monRootfs, cfg.VSock.UDSPath)
 	}
 
+	vmmLog.Debug("staged boot: sending drives, boot-source and vsock")
+	if err := s.client.putDrives(ctx, cfg.Drives); err != nil {
+		return err
+	}
+	if err := s.client.putBootSource(ctx, cfg.Source); err != nil {
+		return err
+	}
+	return s.client.putVSock(ctx, cfg.VSock)
+}
+
+// StartGuest powers on the configured microVM.
+func (s *FirecrackerSession) StartGuest(ctx context.Context) error {
+	vmmLog.Debug("staged boot: sending InstanceStart")
+	return s.client.startGuest(ctx)
+}
+
+// Kill terminates the child and reaps it. For error paths before Supervise.
+func (s *FirecrackerSession) Kill() {
+	_ = s.cmd.Process.Kill()
+	_, _ = s.cmd.Process.Wait()
+}
+
+// Supervise hands the calling process over to the child for the rest of its
+// life: it forwards SIGTERM/SIGINT and, once the child exits, exits this
+// process with the child's exit code, mirroring the semantics syscall.Exec
+// would have had. The caller must not exit before the child, since it is
+// the container's init process.
+//
+// On success this function does not return: it calls os.Exit with the
+// child's exit status once the child exits.
+func (s *FirecrackerSession) Supervise() error {
 	// Forward the signals containerd would send to stop the container.
 	// SIGKILL cannot be caught, so it is not listed here: if it arrives,
 	// this process dies immediately and the child is left running, a known
@@ -294,12 +387,12 @@ func (fc *Firecracker) RunSocketBoot(args types.ExecArgs, ukernel types.Unikerne
 		if !ok {
 			return
 		}
-		if s, ok := sig.(syscall.Signal); ok {
-			_ = cmd.Process.Signal(s)
+		if sg, ok := sig.(syscall.Signal); ok {
+			_ = s.cmd.Process.Signal(sg)
 		}
 	}()
 
-	waitErr := cmd.Wait()
+	waitErr := s.cmd.Wait()
 	signal.Stop(sigCh)
 	close(sigCh)
 

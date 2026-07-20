@@ -22,46 +22,77 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
 // firecrackerClient drives a running Firecracker process over its HTTP-over-Unix
-// API socket: it waits for the socket, configures the microVM and starts the
-// guest.
+// API socket, one configuration resource at a time, so the caller can send each
+// piece of configuration as soon as it becomes available.
+//
+// The client establishes a single connection in connect() and keeps it alive
+// for all requests. This matters because the caller may change its root
+// (pivot_root/chroot) between configuration stages: the socket path stops
+// being resolvable from the new root, but the already-open connection keeps
+// working, since open file descriptors survive a root change.
 //
 // This type is the API driver only; starting (and owning) the Firecracker
-// process is handled by the caller (see RunSocketBoot).
+// process is handled by the caller (see SpawnSocketVMM).
 type firecrackerClient struct {
 	socketPath string
 	httpClient *http.Client
+
+	dialMu   sync.Mutex
+	heldConn net.Conn
 }
 
 // newFirecrackerClient returns a client that talks to the Firecracker API socket
-// at socketPath. The HTTP transport dials that Unix socket for every request, so
-// "http://localhost/<endpoint>" requests actually travel over the socket.
+// at socketPath. "http://localhost/<endpoint>" requests actually travel over the
+// socket. Call connect() before issuing any request.
 func newFirecrackerClient(socketPath string) *firecrackerClient {
+	c := &firecrackerClient{socketPath: socketPath}
 	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socketPath)
-		},
+		DialContext: c.dialContext,
+		// Keep the single connection alive for the whole staged boot: it is
+		// established before the caller may change root, and the socket path
+		// is not resolvable afterwards, so an idle close between stages
+		// would break every later stage.
+		IdleConnTimeout:     0,
+		MaxIdleConns:        1,
+		MaxIdleConnsPerHost: 1,
 	}
-	return &firecrackerClient{
-		socketPath: socketPath,
-		httpClient: &http.Client{Transport: transport},
-	}
+	c.httpClient = &http.Client{Transport: transport}
+	return c
 }
 
-// waitForSocket blocks until the Firecracker API socket exists and accepts
+// dialContext hands the transport the connection pre-established by connect(),
+// and falls back to dialing the socket path directly if that connection was
+// already consumed (which only works while the path is still resolvable).
+func (c *firecrackerClient) dialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	c.dialMu.Lock()
+	defer c.dialMu.Unlock()
+	if c.heldConn != nil {
+		conn := c.heldConn
+		c.heldConn = nil
+		return conn, nil
+	}
+	var d net.Dialer
+	return d.DialContext(ctx, "unix", c.socketPath)
+}
+
+// connect blocks until the Firecracker API socket exists and accepts
 // connections, or the timeout elapses. Firecracker creates the socket shortly
-// after it starts, so the caller polls here before sending any configuration.
-func (c *firecrackerClient) waitForSocket(timeout time.Duration) error {
+// after it starts. The successful connection is kept and reused for all
+// requests (see the type comment for why).
+func (c *firecrackerClient) connect(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("unix", c.socketPath, 50*time.Millisecond)
 		if err == nil {
-			_ = conn.Close()
+			c.dialMu.Lock()
+			c.heldConn = conn
+			c.dialMu.Unlock()
 			return nil
 		}
 		lastErr = err
@@ -73,32 +104,39 @@ func (c *firecrackerClient) waitForSocket(timeout time.Duration) error {
 	return fmt.Errorf("firecracker API socket %q not ready within %s: %w", c.socketPath, timeout, lastErr)
 }
 
-// configure sends the full microVM configuration over the API socket, in the
-// order Firecracker expects, before the guest is started.
-func (c *firecrackerClient) configure(ctx context.Context, cfg *FirecrackerConfig) error {
-	if err := c.put(ctx, "/machine-config", cfg.Machine); err != nil {
-		return err
-	}
-	if err := c.put(ctx, "/boot-source", cfg.Source); err != nil {
-		return err
-	}
-	for _, drive := range cfg.Drives {
+// putMachineConfig configures vCPUs and memory. This needs nothing but the
+// container spec, so it can be sent as the very first stage.
+func (c *firecrackerClient) putMachineConfig(ctx context.Context, machine FirecrackerMachine) error {
+	return c.put(ctx, "/machine-config", machine)
+}
+
+// putNetworkIface attaches one network interface. Firecracker opens the tap
+// device during this call, so it must not be sent before the tap exists.
+func (c *firecrackerClient) putNetworkIface(ctx context.Context, iface FirecrackerNet) error {
+	return c.put(ctx, "/network-interfaces/"+iface.IfaceID, iface)
+}
+
+// putDrives attaches the guest's block devices.
+func (c *firecrackerClient) putDrives(ctx context.Context, drives []FirecrackerDrive) error {
+	for _, drive := range drives {
 		if err := c.put(ctx, "/drives/"+drive.DriveID, drive); err != nil {
 			return err
 		}
 	}
-	for _, iface := range cfg.NetIfs {
-		if err := c.put(ctx, "/network-interfaces/"+iface.IfaceID, iface); err != nil {
-			return err
-		}
-	}
-	// vsock is only configured when vAccel-over-vsock is enabled (uds_path set).
-	if cfg.VSock.UDSPath != "" {
-		if err := c.put(ctx, "/vsock", cfg.VSock); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+
+// putBootSource configures the kernel image, boot arguments and initrd.
+func (c *firecrackerClient) putBootSource(ctx context.Context, source FirecrackerBootSource) error {
+	return c.put(ctx, "/boot-source", source)
+}
+
+// putVSock configures the vsock device. No-op when unset (empty uds_path).
+func (c *firecrackerClient) putVSock(ctx context.Context, vsock FirecrackerVSockDev) error {
+	if vsock.UDSPath == "" {
+		return nil
+	}
+	return c.put(ctx, "/vsock", vsock)
 }
 
 // startGuest issues the InstanceStart action, which powers on the microVM and
