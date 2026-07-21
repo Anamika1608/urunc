@@ -96,7 +96,10 @@ func (c *firecrackerClient) connect(timeout time.Duration) error {
 			return nil
 		}
 		lastErr = err
-		time.Sleep(10 * time.Millisecond)
+		// Firecracker binds the socket within ~1ms of starting, so poll
+		// tightly: a 1ms interval captures nearly all of the readiness
+		// latency a coarser interval would waste, without busy-spinning.
+		time.Sleep(1 * time.Millisecond)
 	}
 	if lastErr == nil {
 		lastErr = context.DeadlineExceeded
