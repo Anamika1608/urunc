@@ -258,6 +258,12 @@ func (fc *Firecracker) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*Fi
 	if socketPath == "" {
 		socketPath = filepath.Join("/tmp/", args.ContainerID+".sock")
 	}
+	// Firecracker binds this path itself; a stale socket file left from an
+	// earlier run (e.g. a crash) would make its bind fail with "address
+	// already in use", so remove any leftover first.
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to remove stale socket %q: %w", socketPath, err)
+	}
 	execCmd := []string{fc.Path(), "--api-sock", socketPath}
 	if !args.Seccomp {
 		execCmd = append(execCmd, "--no-seccomp")
