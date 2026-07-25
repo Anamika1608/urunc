@@ -114,10 +114,7 @@ func (fc *Firecracker) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel
 	// options in FC, since the string return value of the Monitor related
 	// functions in the unikernel interface do not integrate well with FC's
 	// json configuration.
-	apiSockPath := args.SocketPath
-	if apiSockPath == "" {
-		apiSockPath = filepath.Join("/tmp/", args.ContainerID+".sock")
-	}
+	apiSockPath := ResolveSocketPath(args)
 	cmdString := fc.Path() + " --api-sock " + apiSockPath
 	JSONConfigFile := filepath.Join("/tmp/", FCJsonFilename)
 	if args.BootMode == "config-file" {
@@ -254,10 +251,7 @@ type FirecrackerSession struct {
 // are non-zero the child is started directly under that credential, since
 // the caller only drops its own privileges (setupUser) much later.
 func (fc *Firecracker) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*FirecrackerSession, error) {
-	socketPath := args.SocketPath
-	if socketPath == "" {
-		socketPath = filepath.Join("/tmp/", args.ContainerID+".sock")
-	}
+	socketPath := ResolveSocketPath(args)
 	// Firecracker binds this path itself; a stale socket file left from an
 	// earlier run (e.g. a crash) would make its bind fail with "address
 	// already in use", so remove any leftover first.
