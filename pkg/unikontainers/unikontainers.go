@@ -498,6 +498,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		defaultVCPUs = 1
 	}
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
 
 	// ExecArgs
 	vmmArgs := types.ExecArgs{
@@ -508,6 +509,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		MemSizeB:      monitorMemoryBytes(defaultMemSizeMB, u.Spec.Linux.Resources),
 		VCPUs:         uint(defaultVCPUs),
 		Environment:   os.Environ(),
+		SocketPath:    socketPath,
 	}
 
 	// ExecArgs
@@ -708,6 +710,13 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	err = changeRoot(rootfsParams.MonRootfs, withPivot)
 	if err != nil {
 		return err
+	}
+
+	if hypervisors.UsesControlSocket(hypervisors.VmmType(vmmType)) {
+		sockDir := filepath.Dir(hypervisors.ResolveSocketPath(vmmArgs))
+		if err = os.MkdirAll(sockDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
+		}
 	}
 
 	// uid/gid
