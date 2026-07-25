@@ -70,6 +70,10 @@ func (ch *CloudHypervisor) BuildExecCmd(args types.ExecArgs, ukernel types.Unike
 	// Start building the command
 	exArgs := []string{ch.binaryPath}
 
+	// Expose the REST API over a control socket so the runtime can talk to
+	// Cloud Hypervisor after boot (e.g. for graceful shutdown).
+	exArgs = append(exArgs, "--api-socket", "path="+ResolveSocketPath(args))
+
 	// Memory configuration
 	if args.Sharedfs.Type == "virtiofs" {
 		exArgs = append(exArgs, "--memory", fmt.Sprintf("size=%sM,shared=on", chMem))
