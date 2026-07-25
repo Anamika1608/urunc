@@ -596,6 +596,9 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		if !ok {
 			return fmt.Errorf("boot_mode=api is only supported for the firecracker monitor")
 		}
+		if err = ensureSocketDir(vmmType, vmmArgs); err != nil {
+			return err
+		}
 		fcSession, err = fc.SpawnSocketVMM(vmmArgs, procAttrs.UID, procAttrs.GID)
 		if err != nil {
 			uniklog.Errorf("failed to spawn firecracker: %v", err)
@@ -814,6 +817,12 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
+	if !isAPIBoot {
+		if err = ensureSocketDir(vmmType, vmmArgs); err != nil {
+			return err
+		}
+	}
+
 	// uid/gid
 	// Setup uid, gid and additional groups for the monitor process
 	err = setupUser(u.Spec.Process.User)
@@ -886,6 +895,22 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// Execute the VMM using the command we built earlier.
 	uniklog.WithField("command", execCmd).Debug("Ready to execve VMM")
 	return syscall.Exec(vmm.Path(), execCmd, vmmArgs.Environment) //nolint: gosec
+}
+
+// ensureSocketDir creates the directory of the monitor's control socket so the
+// monitor can bind its socket there. For a custom socket_path this may be a
+// directory that does not exist yet; MkdirAll fails only if the location is
+// invalid (e.g. a file already exists on the path). No-op for monitors without
+// a control socket.
+func ensureSocketDir(vmmType string, vmmArgs types.ExecArgs) error {
+	if !hypervisors.UsesControlSocket(hypervisors.VmmType(vmmType)) {
+		return nil
+	}
+	sockDir := filepath.Dir(hypervisors.ResolveSocketPath(vmmArgs))
+	if err := os.MkdirAll(sockDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
+	}
+	return nil
 }
 
 func setupUser(user specs.User) error {
