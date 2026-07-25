@@ -510,6 +510,7 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		defaultVCPUs = 1
 	}
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
 
 	vmmArgs := types.ExecArgs{
 		ContainerID:   u.State.ID,
@@ -519,6 +520,7 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		MemSizeB:      monitorMemoryBytes(defaultMemSizeMB, u.Spec.Linux.Resources),
 		VCPUs:         uint(defaultVCPUs),
 		Environment:   os.Environ(),
+		SocketPath:    socketPath,
 	}
 
 	// Check if container is set to unconfined -- disable seccomp
@@ -722,6 +724,13 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	vmmArgs.Command, err = buildUnikernelCommand(unikernel, unikernelParams)
 	if err != nil {
 		return err
+	}
+
+	if hypervisors.UsesControlSocket(hypervisors.VmmType(ms.MonitorType)) {
+		sockDir := filepath.Dir(hypervisors.ResolveSocketPath(vmmArgs))
+		if err = os.MkdirAll(sockDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
+		}
 	}
 
 	// uid/gid
