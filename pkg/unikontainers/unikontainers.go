@@ -557,12 +557,11 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 
 	// handle network
 	//
-	// For Firecracker's API-based boot mode, the VMM is spawned right here,
-	// before any of the expensive setup work, and configured in stages while
-	// that work runs: machine-config immediately (it needs nothing but the
-	// spec), the network interface as soon as network setup finishes, and
-	// everything unikernel-dependent (drives, boot source) right after
-	// unikernel.Init. The guest itself is only started (InstanceStart) after
+	// For Firecracker's API-based boot mode, the VMM is spawned right after
+	// changeRoot below, so the monitor and its control socket are confined
+	// inside the monitor rootfs, exactly like the exec path. Everything the
+	// VMM needs to be told is known by that point, so its configuration is
+	// sent over the socket in one sequence; only InstanceStart waits for
 	// the start-success handshake, preserving OCI start ordering.
 	//
 	// Rootfs prep (below) only needs the cheap "does this container have a
@@ -591,23 +590,13 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}()
 	ctx := context.Background()
 
+	var fcVmm *hypervisors.Firecracker
 	if isAPIBoot {
 		fc, ok := vmm.(*hypervisors.Firecracker)
 		if !ok {
 			return fmt.Errorf("boot_mode=api is only supported for the firecracker monitor")
 		}
-		if err = ensureSocketDir(vmmType, vmmArgs); err != nil {
-			return err
-		}
-		fcSession, err = fc.SpawnSocketVMM(vmmArgs, procAttrs.UID, procAttrs.GID)
-		if err != nil {
-			uniklog.Errorf("failed to spawn firecracker: %v", err)
-			return err
-		}
-		if err = fcSession.ConfigureMachine(ctx, vmmArgs); err != nil {
-			uniklog.Errorf("failed to configure the machine over the socket: %v", err)
-			return err
-		}
+		fcVmm = fc
 
 		hasNet, err := u.HasNetwork()
 		if err != nil {
@@ -759,17 +748,12 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// If network setup is still running concurrently (isAPIBoot), this is
 	// where we actually need its result: every supported unikernel type
 	// bakes the resolved IP/gateway/MAC into the guest's boot command line
-	// inside Init below. The tap device exists from this point on, so the
-	// network interface is also sent to the VMM right away.
+	// inside Init below.
 	if isAPIBoot {
 		netWG.Wait()
 		if netSetupErr != nil {
 			uniklog.Errorf("failed to setup network: %v", netSetupErr)
 			return netSetupErr
-		}
-		if err = fcSession.ConfigureNetwork(ctx, netArgs); err != nil {
-			uniklog.Errorf("failed to configure the network over the socket: %v", err)
-			return err
 		}
 	}
 	unikernelParams.Net = netArgs
@@ -794,16 +778,6 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// ExecArgs
 	vmmArgs.Command = unikernelCmd
 
-	// Everything unikernel-dependent is known now, so it goes to the VMM
-	// before changeRoot below: the child kept the pre-pivot mount view, so
-	// ConfigureGuest prefixes the monitor rootfs onto the paths it sends.
-	if isAPIBoot {
-		if err = fcSession.ConfigureGuest(ctx, vmmArgs, unikernel, rootfsParams.MonRootfs); err != nil {
-			uniklog.Errorf("failed to configure the guest over the socket: %v", err)
-			return err
-		}
-	}
-
 	// pivot
 	_, err = findNS(u.Spec.Linux.Namespaces, specs.MountNamespace)
 	// Only pivot if a mount namespace entry is actually present in the
@@ -817,8 +791,32 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
-	if !isAPIBoot {
-		if err = ensureSocketDir(vmmType, vmmArgs); err != nil {
+	if err = ensureSocketDir(vmmType, vmmArgs); err != nil {
+		return err
+	}
+
+	// For the API-based boot the monitor is spawned here, after changeRoot,
+	// so the child inherits the pivoted root: its control socket and every
+	// path it opens (kernel, initrd, drives, vsock) resolve inside the
+	// monitor rootfs. urunc is still privileged at this point — the child
+	// is started directly under the container user's credentials, and urunc
+	// drops its own privileges right after (setupUser below).
+	if isAPIBoot {
+		fcSession, err = fcVmm.SpawnSocketVMM(vmmArgs, procAttrs.UID, procAttrs.GID)
+		if err != nil {
+			uniklog.Errorf("failed to spawn firecracker: %v", err)
+			return err
+		}
+		if err = fcSession.ConfigureMachine(ctx, vmmArgs); err != nil {
+			uniklog.Errorf("failed to configure the machine over the socket: %v", err)
+			return err
+		}
+		if err = fcSession.ConfigureNetwork(ctx, netArgs); err != nil {
+			uniklog.Errorf("failed to configure the network over the socket: %v", err)
+			return err
+		}
+		if err = fcSession.ConfigureGuest(ctx, vmmArgs, unikernel); err != nil {
+			uniklog.Errorf("failed to configure the guest over the socket: %v", err)
 			return err
 		}
 	}

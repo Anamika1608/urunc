@@ -241,15 +241,15 @@ type FirecrackerSession struct {
 
 // SpawnSocketVMM starts Firecracker as a child process with only its API
 // socket enabled, and establishes the single persistent connection all later
-// configuration stages use (it survives a later changeRoot; see
-// firecrackerClient).
+// configuration stages use.
 //
-// This is called early in Exec, before the monitor rootfs is prepared and
-// before changeRoot, so unlike the exec path the child keeps the caller's
-// current (pre-pivot) mount view for its lifetime. It does inherit the
-// sandbox's network namespace, which Exec has already joined. When uid/gid
-// are non-zero the child is started directly under that credential, since
-// the caller only drops its own privileges (setupUser) much later.
+// This is called after changeRoot, so the child inherits the already-pivoted
+// root: its control socket and every path it opens live inside the monitor
+// rootfs, the same confinement the exec path gets. It also inherits the
+// sandbox's network namespace, which Exec has already joined. The caller is
+// still privileged here and only drops its own privileges just after
+// (setupUser), so when uid/gid are non-zero the child is started directly
+// under that credential.
 func (fc *Firecracker) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*FirecrackerSession, error) {
 	socketPath := ResolveSocketPath(args)
 	// Firecracker binds this path itself; a stale socket file left from an
@@ -327,23 +327,10 @@ func (s *FirecrackerSession) ConfigureNetwork(ctx context.Context, net types.Net
 // the block devices (their IDs/paths come from the unikernel's
 // MonitorBlockCli), the boot source (its boot args are the unikernel command
 // line, which bakes in the resolved network), and the vsock device if any.
-//
-// The child was spawned before changeRoot, so it resolves paths in the
-// pre-pivot mount view; monRootfs (the directory the caller will pivot into)
-// is therefore prefixed onto every path the child has to open.
-func (s *FirecrackerSession) ConfigureGuest(ctx context.Context, args types.ExecArgs, ukernel types.Unikernel, monRootfs string) error {
+// The child runs inside the monitor rootfs, so every path is sent exactly as
+// the exec path would use it.
+func (s *FirecrackerSession) ConfigureGuest(ctx context.Context, args types.ExecArgs, ukernel types.Unikernel) error {
 	cfg := buildFirecrackerConfig(args, ukernel)
-
-	cfg.Source.ImagePath = filepath.Join(monRootfs, cfg.Source.ImagePath)
-	if cfg.Source.InitrdPath != "" {
-		cfg.Source.InitrdPath = filepath.Join(monRootfs, cfg.Source.InitrdPath)
-	}
-	for i := range cfg.Drives {
-		cfg.Drives[i].HostPath = filepath.Join(monRootfs, cfg.Drives[i].HostPath)
-	}
-	if cfg.VSock.UDSPath != "" {
-		cfg.VSock.UDSPath = filepath.Join(monRootfs, cfg.VSock.UDSPath)
-	}
 
 	vmmLog.Debug("staged boot: sending drives, boot-source and vsock")
 	if err := s.client.putDrives(ctx, cfg.Drives); err != nil {
