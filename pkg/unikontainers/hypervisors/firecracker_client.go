@@ -31,10 +31,8 @@ import (
 // piece of configuration as soon as it becomes available.
 //
 // The client establishes a single connection in connect() and keeps it alive
-// for all requests. This matters because the caller may change its root
-// (pivot_root/chroot) between configuration stages: the socket path stops
-// being resolvable from the new root, but the already-open connection keeps
-// working, since open file descriptors survive a root change.
+// for all requests, so every configuration stage reuses the connection whose
+// readiness connect() already waited for, instead of re-dialing.
 //
 // This type is the API driver only; starting (and owning) the Firecracker
 // process is handled by the caller (see SpawnSocketVMM).
@@ -53,10 +51,8 @@ func newFirecrackerClient(socketPath string) *firecrackerClient {
 	c := &firecrackerClient{socketPath: socketPath}
 	transport := &http.Transport{
 		DialContext: c.dialContext,
-		// Keep the single connection alive for the whole staged boot: it is
-		// established before the caller may change root, and the socket path
-		// is not resolvable afterwards, so an idle close between stages
-		// would break every later stage.
+		// Keep the single connection alive for the whole staged boot so an
+		// idle close between stages does not force a re-dial.
 		IdleConnTimeout:     0,
 		MaxIdleConns:        1,
 		MaxIdleConnsPerHost: 1,
@@ -67,7 +63,7 @@ func newFirecrackerClient(socketPath string) *firecrackerClient {
 
 // dialContext hands the transport the connection pre-established by connect(),
 // and falls back to dialing the socket path directly if that connection was
-// already consumed (which only works while the path is still resolvable).
+// already consumed.
 func (c *firecrackerClient) dialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	c.dialMu.Lock()
 	defer c.dialMu.Unlock()
