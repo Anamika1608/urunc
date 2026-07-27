@@ -798,7 +798,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// For the API-based boot the monitor is spawned here, after changeRoot,
 	// so the child inherits the pivoted root: its control socket and every
 	// path it opens (kernel, initrd, drives, vsock) resolve inside the
-	// monitor rootfs. urunc is still privileged at this point — the child
+	// monitor rootfs. urunc is still privileged at this point; the child
 	// is started directly under the container user's credentials, and urunc
 	// drops its own privileges right after (setupUser below).
 	if isAPIBoot {
