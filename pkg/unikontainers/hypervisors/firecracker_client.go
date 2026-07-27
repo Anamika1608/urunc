@@ -27,8 +27,7 @@ import (
 )
 
 // firecrackerClient drives a running Firecracker process over its HTTP-over-Unix
-// API socket, one configuration resource at a time, so the caller can send each
-// piece of configuration as soon as it becomes available.
+// API socket, one configuration resource at a time.
 //
 // The client establishes a single connection in connect() and keeps it alive
 // for all requests, so every configuration stage reuses the connection whose

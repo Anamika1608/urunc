@@ -135,6 +135,43 @@ func TestConfigureGuestSendsUnprefixedPaths(t *testing.T) {
 	}
 }
 
+// TestConfigureGuestSendsUnprefixedVSockPath verifies the vsock device, when
+// enabled, is sent with its socket path exactly as given, with no rootfs
+// prefixing, and after the boot source.
+func TestConfigureGuestSendsUnprefixedVSockPath(t *testing.T) {
+	api, sockPath := startFakeFirecrackerAPI(t)
+	session := newTestSession(t, sockPath)
+
+	args := types.ExecArgs{
+		ContainerID:   "test-container",
+		Command:       "app",
+		UnikernelPath: "/unikernel/app.bin",
+		MemSizeB:      256 * 1024 * 1024,
+		VCPUs:         1,
+		VAccelType:    "vsock",
+		VSockDevPath:  "/tmp/vaccel",
+		VSockDevID:    3,
+	}
+	if err := session.ConfigureGuest(context.Background(), args, &fakeUnikernel{}); err != nil {
+		t.Fatalf("ConfigureGuest failed: %v", err)
+	}
+
+	reqs := api.recorded()
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests (boot-source, vsock), got %d: %+v", len(reqs), reqs)
+	}
+	vsock := reqs[1]
+	if vsock.path != "/vsock" {
+		t.Errorf("expected last PUT to /vsock, got %s", vsock.path)
+	}
+	if got := vsock.body["uds_path"]; got != "/tmp/vaccel/vaccel.sock" {
+		t.Errorf("uds_path = %v, want unprefixed /tmp/vaccel/vaccel.sock", got)
+	}
+	if got := vsock.body["guest_cid"]; got != float64(3) {
+		t.Errorf("guest_cid = %v, want 3", got)
+	}
+}
+
 // TestSessionSendsStagesInOrder verifies the full post-pivot sequence lands on
 // the API in the order Firecracker requires: machine-config, network
 // interface, boot source, and InstanceStart last.

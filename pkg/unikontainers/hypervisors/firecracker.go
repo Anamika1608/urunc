@@ -229,11 +229,11 @@ func buildFirecrackerConfig(args types.ExecArgs, ukernel types.Unikernel) *Firec
 	}
 }
 
-// FirecrackerSession is a Firecracker child process being configured over its
-// API socket in stages, while the caller performs its own setup work between
-// the stages. Create it with SpawnSocketVMM, feed it configuration with the
-// Configure* methods as each piece becomes available, boot the guest with
-// StartGuest, then hand the calling process over with Supervise.
+// FirecrackerSession is a Firecracker child process configured over its API
+// socket, one resource at a time. Create it with SpawnSocketVMM, send the
+// configuration with the Configure* methods, boot the guest with StartGuest
+// once the caller's start handshake allows it, then hand the calling process
+// over with Supervise.
 type FirecrackerSession struct {
 	cmd    *exec.Cmd
 	client *firecrackerClient
