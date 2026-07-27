@@ -58,14 +58,17 @@ func startFakeFirecrackerAPI(t *testing.T) (*fakeFirecrackerAPI, string) {
 	}
 
 	api := &fakeFirecrackerAPI{}
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		api.mu.Lock()
-		api.requests = append(api.requests, recordedRequest{path: r.URL.Path, body: body})
-		api.mu.Unlock()
-		w.WriteHeader(http.StatusNoContent)
-	})}
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			api.mu.Lock()
+			api.requests = append(api.requests, recordedRequest{path: r.URL.Path, body: body})
+			api.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		ReadHeaderTimeout: time.Second,
+	}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	return api, sockPath
@@ -90,7 +93,7 @@ func TestConfigureGuestSendsUnprefixedPaths(t *testing.T) {
 	session := newTestSession(t, sockPath)
 
 	args := types.ExecArgs{
-		ContainerID:   "testct",
+		ContainerID:   "test-container",
 		Command:       "app -arg",
 		UnikernelPath: "/unikernel/app.bin",
 		InitrdPath:    "/unikernel/initrd",
@@ -141,7 +144,7 @@ func TestSessionSendsStagesInOrder(t *testing.T) {
 	ctx := context.Background()
 
 	args := types.ExecArgs{
-		ContainerID:   "testct",
+		ContainerID:   "test-container",
 		Command:       "app",
 		UnikernelPath: "/unikernel/app.bin",
 		MemSizeB:      256 * 1024 * 1024,
