@@ -1,0 +1,131 @@
+// Copyright (c) 2023-2026, Nubificus LTD
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package hypervisors
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+)
+
+// chAPIClient drives a running Cloud Hypervisor process over its HTTP-over-Unix
+// REST API socket. urunc uses it to create the whole VM configuration in one
+// request and boot the guest when the start handshake allows it.
+//
+// The client establishes a single connection in connect() and keeps it alive
+// for all requests, so every request reuses the connection whose readiness
+// connect() already waited for, instead of re-dialing.
+type chAPIClient struct {
+	socketPath string
+	httpClient *http.Client
+
+	dialMu   sync.Mutex
+	heldConn net.Conn
+}
+
+func newCHAPIClient(socketPath string) *chAPIClient {
+	c := &chAPIClient{socketPath: socketPath}
+	transport := &http.Transport{
+		DialContext:         c.dialContext,
+		IdleConnTimeout:     0,
+		MaxIdleConns:        1,
+		MaxIdleConnsPerHost: 1,
+	}
+	c.httpClient = &http.Client{Transport: transport}
+	return c
+}
+
+// dialContext hands the transport the connection pre-established by connect(),
+// and falls back to dialing the socket path directly if that connection was
+// already consumed.
+func (c *chAPIClient) dialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	c.dialMu.Lock()
+	defer c.dialMu.Unlock()
+	if c.heldConn != nil {
+		conn := c.heldConn
+		c.heldConn = nil
+		return conn, nil
+	}
+	var d net.Dialer
+	return d.DialContext(ctx, "unix", c.socketPath)
+}
+
+// connect blocks until the API socket exists and accepts connections, or the
+// timeout elapses. Cloud Hypervisor creates the socket shortly after it
+// starts, so the dial is retried tightly.
+func (c *chAPIClient) connect(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", c.socketPath, 50*time.Millisecond)
+		if err == nil {
+			c.dialMu.Lock()
+			c.heldConn = conn
+			c.dialMu.Unlock()
+			return nil
+		}
+		lastErr = err
+		time.Sleep(1 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = context.DeadlineExceeded
+	}
+	return fmt.Errorf("cloud-hypervisor API socket %q not ready within %s: %w", c.socketPath, timeout, lastErr)
+}
+
+// createVM sends the full VM configuration.
+func (c *chAPIClient) createVM(ctx context.Context, cfg *CHVMConfig) error {
+	return c.put(ctx, "/api/v1/vm.create", cfg)
+}
+
+// bootVM boots the created VM.
+func (c *chAPIClient) bootVM(ctx context.Context) error {
+	return c.put(ctx, "/api/v1/vm.boot", nil)
+}
+
+// put sends body as an HTTP PUT to the given API path over the Unix socket,
+// returning an error for any non-2xx response. A nil body sends an empty
+// request.
+func (c *chAPIClient) put(ctx context.Context, path string, body any) error {
+	var payload []byte
+	if body != nil {
+		var err error
+		payload, err = json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal %s request: %w", path, err)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, "http://localhost"+path, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build %s request: %w", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send %s request: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s returned HTTP %d: %s", path, resp.StatusCode, string(respBody))
+	}
+	return nil
+}
