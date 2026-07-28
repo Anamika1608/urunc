@@ -499,6 +499,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
 	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
+	bootMode := u.UruncCfg.Monitors[vmmType].BootMode
 
 	// ExecArgs
 	vmmArgs := types.ExecArgs{
@@ -510,6 +511,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		VCPUs:         uint(defaultVCPUs),
 		Environment:   os.Environ(),
 		SocketPath:    socketPath,
+		BootMode:      bootMode,
 	}
 
 	// ExecArgs
