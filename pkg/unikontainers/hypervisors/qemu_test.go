@@ -80,6 +80,7 @@ func TestQemuBuildExecCmd(t *testing.T) {
 				"-vga none",
 				"-serial stdio",
 				"-monitor null",
+				"-qmp unix:/tmp/.sock,server,nowait",
 				"-m 256M",
 				"-kernel " + testKernelPath,
 				"-nic none",
@@ -93,6 +94,26 @@ func TestQemuBuildExecCmd(t *testing.T) {
 				"virtio-blk-pci",
 				"vhost-vsock-pci",
 			},
+		},
+		{
+			name: "configured SocketPath renders -qmp on that path",
+			args: types.ExecArgs{
+				UnikernelPath: testKernelPath,
+				Command:       testCommand,
+				SocketPath:    "/run/urunc/q.sock",
+			},
+			unikernel:   &fakeUnikernel{},
+			mustContain: []string{"-qmp unix:/run/urunc/q.sock,server,nowait"},
+		},
+		{
+			name: "default SocketPath uses the container-id path",
+			args: types.ExecArgs{
+				UnikernelPath: testKernelPath,
+				Command:       testCommand,
+				ContainerID:   "abc123",
+			},
+			unikernel:   &fakeUnikernel{},
+			mustContain: []string{"-qmp unix:/tmp/abc123.sock,server,nowait"},
 		},
 		{
 			name: "custom MemSizeB renders -m in MB",
