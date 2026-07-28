@@ -193,6 +193,7 @@ func (q *Qemu) SpawnPausedVMM(args types.ExecArgs, ukernel types.Unikernel, uid,
 
 	cmd := exec.Command(execCmd[0], execCmd[1:]...) //nolint: gosec
 	cmd.Env = args.Environment
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if uid != 0 || gid != 0 {
@@ -238,6 +239,10 @@ func (s *QemuSession) Kill() {
 // On success this function does not return: it calls os.Exit with the
 // child's exit status once the child exits.
 func (s *QemuSession) Supervise() error {
+	// Forward the signals containerd would send to stop the container.
+	// SIGKILL cannot be caught, so it is not listed here: if it arrives,
+	// this process dies immediately and the child is left running, a known
+	// gap for this bounded experiment, not yet handled.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {

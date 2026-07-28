@@ -706,6 +706,9 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// inside the monitor rootfs. The guest only starts when the QMP cont is
 	// sent after the start-success handshake, preserving OCI start ordering.
 	isAPIBoot := bootMode == "api" && vmmType == string(hypervisors.QemuVmm)
+	if isAPIBoot && vmmArgs.Sharedfs.Type == "virtiofs" {
+		return fmt.Errorf("boot_mode=api does not support the virtiofs shared filesystem yet")
+	}
 	var qSession *hypervisors.QemuSession
 	qHandedOff := false
 	defer func() {
@@ -775,7 +778,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
-	uniklog.Debug("calling vmm execve")
+	uniklog.Debug("preparing to start the vmm")
 	metrics.Capture(m.TS18)
 
 	// Build the VMM command once and verify it can be constructed successfully.
