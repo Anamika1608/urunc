@@ -693,6 +693,9 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// inside the monitor rootfs. The guest only starts when the QMP cont is
 	// sent after the start-success handshake, preserving OCI start ordering.
 	isAPIBoot := vmmArgs.BootMode == "api" && ms.MonitorType == string(hypervisors.QemuVmm)
+	if isAPIBoot && vmmArgs.Sharedfs.Type == "virtiofs" {
+		return fmt.Errorf("boot_mode=api does not support the virtiofs shared filesystem yet")
+	}
 	var qSession *hypervisors.QemuSession
 	qHandedOff := false
 	defer func() {

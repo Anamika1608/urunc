@@ -47,9 +47,15 @@ func connectQMP(socketPath string, timeout time.Duration) (*qmpClient, error) {
 		time.Sleep(1 * time.Millisecond)
 	}
 	if conn == nil {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("dial timed out after %s", timeout)
+		}
 		return nil, fmt.Errorf("qmp socket %q not ready within %s: %w", socketPath, timeout, lastErr)
 	}
 	c := &qmpClient{conn: conn, rd: bufio.NewReader(conn)}
+	// Bound the handshake itself: a dial succeeding does not guarantee QEMU
+	// keeps talking, so reads/writes below must not block forever.
+	_ = c.conn.SetDeadline(deadline)
 	// The server speaks first: nothing may be sent before its greeting is read.
 	greeting, err := c.readMessage()
 	if err != nil {
@@ -64,11 +70,15 @@ func connectQMP(socketPath string, timeout time.Duration) (*qmpClient, error) {
 		c.close()
 		return nil, err
 	}
+	_ = c.conn.SetDeadline(time.Time{})
 	return c, nil
 }
 
 // execute sends one argument-less QMP command and waits for its result.
 func (c *qmpClient) execute(command string) error {
+	_ = c.conn.SetDeadline(time.Now().Add(5 * time.Second))
+	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
+
 	req, err := json.Marshal(map[string]string{"execute": command})
 	if err != nil {
 		return fmt.Errorf("failed to marshal QMP %s: %w", command, err)
