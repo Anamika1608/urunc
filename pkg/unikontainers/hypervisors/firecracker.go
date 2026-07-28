@@ -265,6 +265,7 @@ func (fc *Firecracker) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*Fi
 
 	cmd := exec.Command(execCmd[0], execCmd[1:]...) //nolint: gosec
 	cmd.Env = args.Environment
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if uid != 0 || gid != 0 {
