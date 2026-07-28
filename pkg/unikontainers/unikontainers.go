@@ -510,6 +510,7 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		defaultVCPUs = 1
 	}
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
 
 	vmmArgs := types.ExecArgs{
 		ContainerID:   u.State.ID,
@@ -518,6 +519,7 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		Seccomp:       true, // Enable Seccomp by default
 		MemSizeB:      monitorMemoryBytes(defaultMemSizeMB, u.Spec.Linux.Resources),
 		VCPUs:         uint(defaultVCPUs),
+		SocketPath:    socketPath,
 		Environment:   os.Environ(),
 	}
 
@@ -722,6 +724,19 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	vmmArgs.Command, err = buildUnikernelCommand(unikernel, unikernelParams)
 	if err != nil {
 		return err
+	}
+
+	// Ensure the monitor's control socket directory exists inside the monitor
+	// rootfs, so the monitor can bind its socket there. changeRoot has already
+	// made this process' root the monitor rootfs, so the socket path is
+	// created relative to it. The default (/tmp) already exists; a custom
+	// socket_path may point at a directory that does not, and MkdirAll fails
+	// if that location is invalid (e.g. a file already exists there).
+	if hypervisors.UsesControlSocket(hypervisors.VmmType(ms.MonitorType)) {
+		sockDir := filepath.Dir(hypervisors.ResolveSocketPath(vmmArgs))
+		if err = os.MkdirAll(sockDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
+		}
 	}
 
 	// uid/gid

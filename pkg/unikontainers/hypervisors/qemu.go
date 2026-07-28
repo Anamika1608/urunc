@@ -73,6 +73,10 @@ func (q *Qemu) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel) ([]str
 		"-serial", "stdio",
 		"-monitor", "null",
 	}
+	// Expose a QMP control socket so the runtime can talk to QEMU after boot
+	// (e.g. for graceful shutdown). server,nowait lets QEMU boot without
+	// waiting for a client to connect.
+	exArgs = append(exArgs, "-qmp", "unix:"+ResolveSocketPath(args)+",server,nowait")
 
 	if args.VCPUs > 0 {
 		exArgs = append(exArgs, "-smp", strconv.FormatUint(uint64(args.VCPUs), 10))

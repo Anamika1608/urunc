@@ -165,10 +165,19 @@ Each monitor subsection supports the following options:
 | `path` | string | (empty) | Optional custom path to the monitor binary. If not specified, urunc will search for the binary in PATH |
 | `data_path` | string | (empty) | Optional custom path for the monitor's data file directory |
 | `vhost` | boolean | `false` | Optional: enable `vhost-net` for the monitor's network device, to improve network performance. Currently only honored by the `qemu` monitor |
+| `socket_path` | string | (empty) | Optional path for the monitor's control socket. If not specified, urunc uses a per-container default (`/tmp/<container-id>.sock`) |
 
 Since Qemu is the only currently supported monitor which requires extra data to
 boot a VM, `urunc` will first check `/usr/local/share` and then `/usr/share` for
 Qemu's data files.
+
+The `socket_path` option applies to the monitors that expose a control socket:
+Firecracker (its API socket), Qemu (a QMP socket) and Cloud Hypervisor (its REST
+API socket). It has no effect on the other monitors. The monitor creates the
+socket inside its own (pivoted) rootfs; `urunc` creates the directory of a
+custom `socket_path` there for you, so the path can be anywhere. It only fails
+if the location is invalid, for example when a file already exists at one of the
+directories in the path.
 
 **Example:**
 
@@ -184,6 +193,7 @@ vhost = false
 default_memory_mb = 512
 default_vcpus = 2
 path = "/opt/firecracker/firecracker"
+socket_path = "/run/urunc/fc.sock"
 ```
 
 ### Extra binaries Configuration
