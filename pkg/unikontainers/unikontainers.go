@@ -511,6 +511,7 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 	}
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
 	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
+	bootMode := u.UruncCfg.Monitors[vmmType].BootMode
 
 	vmmArgs := types.ExecArgs{
 		ContainerID:   u.State.ID,
@@ -521,6 +522,7 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		VCPUs:         uint(defaultVCPUs),
 		Environment:   os.Environ(),
 		SocketPath:    socketPath,
+		BootMode:      bootMode,
 	}
 
 	// Check if container is set to unconfined -- disable seccomp
