@@ -17,8 +17,10 @@ package hypervisors
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
 	"golang.org/x/sys/unix"
@@ -85,6 +87,21 @@ func (fc *Firecracker) Stop(pid int) error {
 
 func (fc *Firecracker) Ok() error {
 	return nil
+}
+
+// SupportsGuestShutdown reports whether Firecracker can shut the guest down
+// gracefully. Firecracker's SendCtrlAltDel action only exists on x86; on
+// aarch64 the API rejects it, so guest shutdown is supported on amd64 only.
+func (fc *Firecracker) SupportsGuestShutdown() bool {
+	return runtime.GOARCH == "amd64"
+}
+
+// RequestGuestShutdown asks Firecracker to inject a Ctrl+Alt+Del into the
+// guest over its REST API control socket. socketPath is the already-resolved,
+// host-reachable path; it is dialed directly. A non-2xx response is an error.
+func (fc *Firecracker) RequestGuestShutdown(socketPath string) error {
+	body := []byte(`{"action_type":"SendCtrlAltDel"}`)
+	return unixSocketRequest(socketPath, http.MethodPut, "/actions", body)
 }
 
 func (fc *Firecracker) UsesKVM() bool {

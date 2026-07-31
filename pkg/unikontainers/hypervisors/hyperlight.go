@@ -15,6 +15,7 @@
 package hypervisors
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
@@ -49,6 +50,17 @@ func (h *Hyperlight) SupportsSharedfs(_ string) bool {
 // SupportsControlSocket reports that Hyperlight exposes no control socket.
 func (h *Hyperlight) SupportsControlSocket() bool {
 	return false
+}
+
+// SupportsGuestShutdown reports that Hyperlight has no control socket to
+// request a graceful guest shutdown over.
+func (h *Hyperlight) SupportsGuestShutdown() bool {
+	return false
+}
+
+// RequestGuestShutdown is unsupported for Hyperlight; it has no control socket.
+func (h *Hyperlight) RequestGuestShutdown(_ string) error {
+	return fmt.Errorf("guest shutdown not supported for hyperlight")
 }
 
 // Path returns the path to the hyperlight binary.
