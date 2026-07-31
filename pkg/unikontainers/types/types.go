@@ -138,10 +138,11 @@ type ExtraBinConfig struct {
 // MonitorConfig struct is used to hold hypervisor specific configuration
 // that is parsed from the urunc config file or state.json annotations
 type MonitorConfig struct {
-	DefaultMemoryMB uint   `toml:"default_memory_mb"`
-	DefaultVCPUs    uint   `toml:"default_vcpus"`
-	BinaryPath      string `toml:"path,omitempty"`        // Optional path to the hypervisor binary
-	DataPath        string `toml:"data_path,omitempty"`   // Optional path to the hypervisor data files (e.g. qemu bios stuff)
-	Vhost           bool   `toml:"vhost,omitempty"`       // Optional: enable vhost for network performance optimization
-	SocketPath      string `toml:"socket_path,omitempty"` // Optional path for the monitor's control socket (unset means no control socket)
+	DefaultMemoryMB  uint   `toml:"default_memory_mb"`
+	DefaultVCPUs     uint   `toml:"default_vcpus"`
+	BinaryPath       string `toml:"path,omitempty"`              // Optional path to the hypervisor binary
+	DataPath         string `toml:"data_path,omitempty"`         // Optional path to the hypervisor data files (e.g. qemu bios stuff)
+	Vhost            bool   `toml:"vhost,omitempty"`             // Optional: enable vhost for network performance optimization
+	SocketPath       string `toml:"socket_path,omitempty"`       // Optional path for the monitor's control socket (unset means no control socket)
+	GracefulShutdown bool   `toml:"graceful_shutdown,omitempty"` // When true, urunc asks the monitor to shut the guest down gracefully on SIGTERM instead of killing it.
 }
