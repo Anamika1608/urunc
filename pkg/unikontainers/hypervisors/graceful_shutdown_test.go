@@ -157,6 +157,59 @@ func TestQemuRequestGuestShutdown(t *testing.T) {
 	})
 }
 
+// TestQemuClientDrainsPowerdownReturn proves the QMP client reads until it sees
+// the command's own "return", consuming it off the wire, instead of stopping at
+// the async POWERDOWN event. net.Pipe is fully synchronous: every server write
+// blocks until the client reads it. A single-read client (one that treated the
+// event as the reply and left the return unread) would leave the server's
+// return write pending and deadlock the follow-up command; a correct
+// read-until-return client drains it and lets the follow-up complete. The
+// deadlines turn that deadlock into a clean, prompt failure rather than a hang.
+func TestQemuGuestShutdownDrainsPowerdownReturn(t *testing.T) {
+	t.Parallel()
+
+	clientConn, serverConn := net.Pipe()
+	defer serverConn.Close()
+	require.NoError(t, clientConn.SetDeadline(time.Now().Add(3*time.Second)))
+	require.NoError(t, serverConn.SetDeadline(time.Now().Add(3*time.Second)))
+
+	done := make(chan error, 1)
+	go func() {
+		defer clientConn.Close()
+		enc := json.NewEncoder(clientConn)
+		dec := json.NewDecoder(clientConn)
+		if err := qmpCommand(enc, dec, "system_powerdown"); err != nil {
+			done <- err
+			return
+		}
+		// Reachable only if the powerdown "return" was drained; otherwise it
+		// deadlocks against the server's still-pending return write.
+		done <- qmpCommand(enc, dec, "query-status")
+	}()
+
+	senc := json.NewEncoder(serverConn)
+	sdec := json.NewDecoder(serverConn)
+
+	var cmd map[string]any
+	require.NoError(t, sdec.Decode(&cmd))
+	assert.Equal(t, "system_powerdown", cmd["execute"])
+	// Async event first, then the command's own return (fact G29).
+	require.NoError(t, senc.Encode(map[string]any{"event": "POWERDOWN"}))
+	require.NoError(t, senc.Encode(map[string]any{"return": map[string]any{}}))
+
+	require.NoError(t, sdec.Decode(&cmd),
+		"follow-up command must arrive, proving the powerdown return was drained")
+	assert.Equal(t, "query-status", cmd["execute"])
+	require.NoError(t, senc.Encode(map[string]any{"return": map[string]any{}}))
+
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("qmp client did not drain the powerdown return; follow-up command deadlocked")
+	}
+}
+
 // clhFakeServer is a fake Cloud Hypervisor REST server speaking HTTP over a
 // unix socket. It records the method and path of every request and answers
 // with a configured status code.
