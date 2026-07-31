@@ -16,6 +16,7 @@ package hypervisors
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
@@ -42,6 +43,19 @@ func (ch *CloudHypervisor) Stop(pid int) error {
 
 func (ch *CloudHypervisor) Ok() error {
 	return nil
+}
+
+// SupportsGuestShutdown reports that Cloud Hypervisor can shut the guest down
+// gracefully via its REST API power-button endpoint.
+func (ch *CloudHypervisor) SupportsGuestShutdown() bool {
+	return true
+}
+
+// RequestGuestShutdown asks Cloud Hypervisor to press the guest's power button
+// over its REST API control socket. socketPath is the already-resolved,
+// host-reachable path; it is dialed directly. A non-2xx response is an error.
+func (ch *CloudHypervisor) RequestGuestShutdown(socketPath string) error {
+	return unixSocketRequest(socketPath, http.MethodPut, "/api/v1/vm.power-button", nil)
 }
 
 // UsesKVM returns true as Cloud Hypervisor is a KVM-based VMM

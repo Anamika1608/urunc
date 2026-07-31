@@ -15,6 +15,7 @@
 package hypervisors
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -44,6 +45,17 @@ func (s *SPT) Stop(pid int) error {
 // UsesKVM returns a bool value depending on if the monitor uses KVM
 func (s *SPT) UsesKVM() bool {
 	return false
+}
+
+// SupportsGuestShutdown reports that SPT has no control socket to request a
+// graceful guest shutdown over.
+func (s *SPT) SupportsGuestShutdown() bool {
+	return false
+}
+
+// RequestGuestShutdown is unsupported for SPT; it has no control socket.
+func (s *SPT) RequestGuestShutdown(_ string) error {
+	return fmt.Errorf("guest shutdown not supported for spt")
 }
 
 // SupportsSharedfs returns a bool value depending on the monitor support for shared-fs
