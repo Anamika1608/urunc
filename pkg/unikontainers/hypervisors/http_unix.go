@@ -37,6 +37,10 @@ func unixSocketRequest(socketPath, method, urlPath string, body []byte) error {
 	client := &http.Client{
 		Timeout: socketRequestTimeout,
 		Transport: &http.Transport{
+			// A single one-shot request; keep no idle unix connection in the
+			// pool, so nothing lingers if this helper is ever called from a
+			// long-lived process.
+			DisableKeepAlives: true,
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
 				return d.DialContext(ctx, "unix", socketPath)
@@ -62,7 +66,8 @@ func unixSocketRequest(socketPath, method, urlPath string, body []byte) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	// The body is only used to enrich an error string, so cap the read.
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("%s %s returned status %d: %s",
 			method, urlPath, resp.StatusCode, strings.TrimSpace(string(respBody)))

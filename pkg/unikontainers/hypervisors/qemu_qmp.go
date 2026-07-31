@@ -37,13 +37,18 @@ func (q *Qemu) SupportsGuestShutdown() bool {
 // any command, and system_powerdown's reply is interleaved with an async
 // POWERDOWN event, so each response is read until its own "return" arrives.
 func (q *Qemu) RequestGuestShutdown(socketPath string) error {
-	conn, err := net.DialTimeout("unix", socketPath, qmpDeadline)
+	// Bound the whole attempt (dial plus exchange) by a single absolute
+	// deadline, so the worst case stays within one qmpDeadline budget rather
+	// than dial timeout plus exchange timeout stacking on top of each other.
+	deadline := time.Now().Add(qmpDeadline)
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Until(deadline))
 	if err != nil {
 		return fmt.Errorf("failed to connect to QMP socket %q: %w", socketPath, err)
 	}
 	defer conn.Close()
 
-	if err := conn.SetDeadline(time.Now().Add(qmpDeadline)); err != nil {
+	if err := conn.SetDeadline(deadline); err != nil {
 		return fmt.Errorf("failed to set QMP socket deadline: %w", err)
 	}
 

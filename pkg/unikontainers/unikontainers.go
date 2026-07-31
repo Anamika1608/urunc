@@ -865,6 +865,11 @@ func (u *Unikontainer) Signal(signal unix.Signal) error {
 			uniklog.Debug("graceful shutdown requested via control socket")
 			requested = true
 		}
+	} else if signal == unix.SIGTERM && u.UruncCfg.Monitors[vmmType].GracefulShutdown {
+		// SIGTERM with graceful shutdown enabled, yet graceful is false: the
+		// only remaining reason is that this monitor does not support it. Log it
+		// so the fall-through is observable, without changing control flow.
+		uniklog.Debug("graceful shutdown enabled but not supported by this monitor, forwarding signal")
 	}
 
 	if !requested {
