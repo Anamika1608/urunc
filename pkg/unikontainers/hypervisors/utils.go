@@ -17,29 +17,12 @@ package hypervisors
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
 
-	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
 	"golang.org/x/sys/unix"
 )
-
-// DefaultSocketDir is the directory used for a monitor's control socket when
-// no socket_path is configured. It always exists inside the monitor rootfs,
-// so the default path needs no extra directory setup.
-const DefaultSocketDir = "/tmp"
-
-// ResolveSocketPath returns the path for a monitor's control socket: the
-// configured SocketPath when set, otherwise a per-container default under
-// DefaultSocketDir. Shared by every monitor that exposes a control socket.
-func ResolveSocketPath(args types.ExecArgs) string {
-	if args.SocketPath != "" {
-		return args.SocketPath
-	}
-	return filepath.Join(DefaultSocketDir, args.ContainerID+".sock")
-}
 
 func cpuArch() string {
 	switch runtime.GOARCH {
