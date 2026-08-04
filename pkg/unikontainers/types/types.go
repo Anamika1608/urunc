@@ -115,7 +115,7 @@ type ExecArgs struct {
 	VAccelType    string   // Specifies the vAccel acceleration type(e.g. vsock). When empty, vAccel is disabled
 	VSockDevPath  string   // The directory inside the monitor rootfs with the vAccel unix sockets
 	VSockDevID    int      // The guest-cid
-	SocketPath    string   // The path of the monitor's control socket (empty means the monitor's default)
+	SocketPath    string   // The path of the monitor's control socket (empty means no control socket)
 	Net           NetDevParams
 	Sharedfs      SharedfsParams
 }
@@ -146,5 +146,5 @@ type MonitorConfig struct {
 	BinaryPath      string `toml:"path,omitempty"`        // Optional path to the hypervisor binary
 	DataPath        string `toml:"data_path,omitempty"`   // Optional path to the hypervisor data files (e.g. qemu bios stuff)
 	Vhost           bool   `toml:"vhost,omitempty"`       // Optional: enable vhost for network performance optimization
-	SocketPath      string `toml:"socket_path,omitempty"` // Optional path for the monitor's control socket (falls back to a per-container default)
+	SocketPath      string `toml:"socket_path,omitempty"` // Optional path for the monitor's control socket (unset means no control socket)
 }
