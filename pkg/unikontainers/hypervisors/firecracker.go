@@ -108,13 +108,21 @@ func (fc *Firecracker) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel
 	// options in FC, since the string return value of the Monitor related
 	// functions in the unikernel interface do not integrate well with FC's
 	// json configuration.
-	// Launch Firecracker with its API socket enabled (drop --no-api) while
-	// still booting the guest from the config file. This preserves today's
-	// boot behavior and additionally leaves the control socket open for use
-	// after the guest has started.
-	apiSockPath := ResolveSocketPath(args)
+	// Launch Firecracker in one of two modes, both booting the guest from the
+	// config file:
+	//   - With a socket_path configured, enable the API socket
+	//     (--api-sock <path>) so the control socket stays open for use after
+	//     the guest has started.
+	//   - With no socket_path, launch with --no-api (upstream default) so no
+	//     control socket is exposed.
 	JSONConfigFile := filepath.Join("/tmp/", FCJsonFilename)
-	cmdString := fc.Path() + " --api-sock " + apiSockPath + " --config-file " + JSONConfigFile
+	cmdString := fc.Path()
+	if args.SocketPath != "" {
+		cmdString += " --api-sock " + args.SocketPath
+	} else {
+		cmdString += " --no-api"
+	}
+	cmdString += " --config-file " + JSONConfigFile
 	if !args.Seccomp {
 		cmdString += " --no-seccomp"
 	}

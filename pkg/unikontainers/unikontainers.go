@@ -719,7 +719,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// socket_path may point at a directory that does not, and MkdirAll fails
 	// if that location is invalid (e.g. a file already exists there).
 	if hypervisors.UsesControlSocket(hypervisors.VmmType(vmmType)) {
-		sockDir := filepath.Dir(hypervisors.ResolveSocketPath(vmmArgs))
+		sockDir := filepath.Dir(vmmArgs.SocketPath)
 		if err = os.MkdirAll(sockDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
 		}

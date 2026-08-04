@@ -70,9 +70,12 @@ func (ch *CloudHypervisor) BuildExecCmd(args types.ExecArgs, ukernel types.Unike
 	// Start building the command
 	exArgs := []string{ch.binaryPath}
 
-	// Expose the REST API over a control socket so the runtime can talk to
-	// Cloud Hypervisor after boot (e.g. for graceful shutdown).
-	exArgs = append(exArgs, "--api-socket", "path="+ResolveSocketPath(args))
+	// Expose the REST API over a control socket only when a socket_path is
+	// configured, so the runtime can talk to Cloud Hypervisor after boot (e.g.
+	// for graceful shutdown). With no configured path no control socket is set up.
+	if args.SocketPath != "" {
+		exArgs = append(exArgs, "--api-socket", "path="+args.SocketPath)
+	}
 
 	// Memory configuration
 	if args.Sharedfs.Type == "virtiofs" {
