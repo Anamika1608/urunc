@@ -712,24 +712,27 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
-	// Ensure the monitor's control socket directory exists inside the monitor
-	// rootfs, so the monitor can bind its socket there. changeRoot has already
-	// made this process' root the monitor rootfs, so the socket path is
-	// created relative to it. The default (/tmp) already exists; a custom
-	// socket_path may point at a directory that does not, and MkdirAll fails
-	// if that location is invalid (e.g. a file already exists there).
-	if hypervisors.UsesControlSocket(hypervisors.VmmType(vmmType)) {
-		sockDir := filepath.Dir(vmmArgs.SocketPath)
-		if err = os.MkdirAll(sockDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
-		}
-	}
-
 	// uid/gid
 	// Setup uid, gid and additional groups for the monitor process
 	err = setupUser(u.Spec.Process.User)
 	if err != nil {
 		return err
+	}
+
+	// Set up the monitor's control socket, only when one is configured.
+	// This runs after setupUser so the directory and any stale socket are
+	// handled as the monitor's user, and the monitor (which may be non-root)
+	// can bind its socket there.
+	if hypervisors.UsesControlSocket(hypervisors.VmmType(vmmType)) && vmmArgs.SocketPath != "" {
+		sockDir := filepath.Dir(vmmArgs.SocketPath)
+		if err = os.MkdirAll(sockDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
+		}
+		// Remove a stale socket left by a previous instance (e.g. a restart
+		// reusing the same socket_path) so the monitor can bind it again.
+		if err = os.Remove(vmmArgs.SocketPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove stale control socket %q: %w", vmmArgs.SocketPath, err)
+		}
 	}
 
 	// execute hooks
