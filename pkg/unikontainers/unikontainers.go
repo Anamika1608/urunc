@@ -733,19 +733,14 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
-	// Set up the monitor's control socket, only when one is configured.
-	// This runs after setupUser so the directory and any stale socket are
-	// handled as the monitor's user, and the monitor (which may be non-root)
-	// can bind its socket there.
-	if hypervisors.UsesControlSocket(hypervisors.VmmType(ms.MonitorType)) && vmmArgs.SocketPath != "" {
+	// Create the directory for the monitor's control socket, only when one is
+	// configured. This runs after setupUser so the directory is owned by the
+	// monitor's user and a non-root monitor can bind its socket there. The
+	// socket file itself is created by the monitor and removed in Delete.
+	if vmm.UsesControlSocket() && vmmArgs.SocketPath != "" {
 		sockDir := filepath.Dir(vmmArgs.SocketPath)
-		if err = os.MkdirAll(sockDir, 0o755); err != nil {
+		if err = os.MkdirAll(sockDir, 0o700); err != nil {
 			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
-		}
-		// Remove a stale socket left by a previous instance (e.g. a restart
-		// reusing the same socket_path) so the monitor can bind it again.
-		if err = os.Remove(vmmArgs.SocketPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove stale control socket %q: %w", vmmArgs.SocketPath, err)
 		}
 	}
 
@@ -968,6 +963,28 @@ func (u *Unikontainer) Delete() error {
 	// The monitor rootfs lives under the bundle. Its mounts went away with the
 	// monitor's mount namespace, so only the directory tree itself is left.
 	monRootfs := filepath.Join(filepath.Clean(u.State.Bundle), monitorRootfsDirName)
+
+	// Remove the monitor's control socket, if one was configured, so that a
+	// restart reusing the same socket_path does not find a stale socket. The
+	// socket lives inside the monitor rootfs (the monitor binds it there after
+	// the pivot in Exec); at delete time that rootfs is reachable at its real
+	// path. Only an actual socket is removed, so a misconfigured socket_path
+	// pointing at a regular file is never deleted. This runs before the rootfs
+	// tree is removed, so the socket is still reachable.
+	vmmType := u.State.Annotations[annotHypervisor]
+	vmm, err := hypervisors.NewVMM(hypervisors.VmmType(vmmType), u.UruncCfg.Monitors)
+	if err != nil {
+		return err
+	}
+	if socketPath := u.UruncCfg.Monitors[vmmType].SocketPath; socketPath != "" && vmm.UsesControlSocket() {
+		sockRealPath := filepath.Join(monRootfs, socketPath)
+		if info, statErr := os.Lstat(sockRealPath); statErr == nil && info.Mode()&os.ModeSocket != 0 {
+			if err = os.Remove(sockRealPath); err != nil {
+				return fmt.Errorf("failed to remove control socket %q: %w", sockRealPath, err)
+			}
+		}
+	}
+
 	err = os.RemoveAll(monRootfs)
 	if err != nil {
 		return fmt.Errorf("failed to remove the monitor rootfs %s: %w", monRootfs, err)
