@@ -719,19 +719,14 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
-	// Set up the monitor's control socket, only when one is configured.
-	// This runs after setupUser so the directory and any stale socket are
-	// handled as the monitor's user, and the monitor (which may be non-root)
-	// can bind its socket there.
-	if hypervisors.UsesControlSocket(hypervisors.VmmType(vmmType)) && vmmArgs.SocketPath != "" {
+	// Create the directory for the monitor's control socket, only when one is
+	// configured. This runs after setupUser so the directory is owned by the
+	// monitor's user and a non-root monitor can bind its socket there. The
+	// socket file itself is created by the monitor and removed in Delete.
+	if vmm.UsesControlSocket() && vmmArgs.SocketPath != "" {
 		sockDir := filepath.Dir(vmmArgs.SocketPath)
-		if err = os.MkdirAll(sockDir, 0o755); err != nil {
+		if err = os.MkdirAll(sockDir, 0o700); err != nil {
 			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
-		}
-		// Remove a stale socket left by a previous instance (e.g. a restart
-		// reusing the same socket_path) so the monitor can bind it again.
-		if err = os.Remove(vmmArgs.SocketPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove stale control socket %q: %w", vmmArgs.SocketPath, err)
 		}
 	}
 
@@ -861,6 +856,7 @@ func (u *Unikontainer) Kill() error {
 func (u *Unikontainer) Delete() error {
 	var dirs []string
 	var prefPath string
+	var monitorRoot string
 
 	if u.isRunning() {
 		return fmt.Errorf("cannot delete running container: %s", u.State.ID)
@@ -908,6 +904,7 @@ func (u *Unikontainer) Delete() error {
 		// clean it up.
 		dirs = append(dirs, monitorRootfsDirName)
 		prefPath = bundleDir
+		monitorRoot = monRootfs
 	} else {
 		// Otherwise remove the enw directories we created inside the
 		// container's rootfs.
@@ -924,6 +921,22 @@ func (u *Unikontainer) Delete() error {
 		}
 		dirs = append(dirs, vmm.Path())
 		prefPath = rootfsDir
+		monitorRoot = rootfsDir
+	}
+
+	// Remove the monitor's control socket, if one was configured, so that a
+	// restart reusing the same socket_path does not find a stale socket. The
+	// socket lives inside the monitor rootfs (the monitor binds it there after
+	// the pivot in Exec); at delete time that rootfs is reachable at its real
+	// path. Only an actual socket is removed, so a misconfigured socket_path
+	// pointing at a regular file is never deleted.
+	if socketPath := u.UruncCfg.Monitors[vmmType].SocketPath; socketPath != "" && vmm.UsesControlSocket() {
+		sockRealPath := filepath.Join(monitorRoot, socketPath)
+		if info, statErr := os.Lstat(sockRealPath); statErr == nil && info.Mode()&os.ModeSocket != 0 {
+			if err = os.Remove(sockRealPath); err != nil {
+				return fmt.Errorf("failed to remove control socket %q: %w", sockRealPath, err)
+			}
+		}
 	}
 
 	err = rmMultipleDirs(prefPath, dirs)

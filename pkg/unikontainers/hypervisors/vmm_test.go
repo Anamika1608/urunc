@@ -18,7 +18,37 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
 )
+
+// TestUsesControlSocket verifies every monitor reports whether it exposes a
+// control socket. The monitors that expose one (Qemu, Firecracker, Cloud
+// Hypervisor) must return true; the rest must return false. Because it is an
+// interface method, a new monitor cannot compile without declaring it.
+func TestUsesControlSocket(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		vmm  types.VMM
+		want bool
+	}{
+		{"qemu", &Qemu{}, true},
+		{"firecracker", &Firecracker{}, true},
+		{"cloud-hypervisor", &CloudHypervisor{}, true},
+		{"hvt", &HVT{}, false},
+		{"spt", &SPT{}, false},
+		{"hedge", &Hedge{}, false},
+		{"hyperlight", &Hyperlight{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.vmm.UsesControlSocket())
+		})
+	}
+}
 
 func TestVMMFactoryQemuVhostFalse(t *testing.T) {
 	t.Parallel()

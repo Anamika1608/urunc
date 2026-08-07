@@ -51,6 +51,11 @@ func (s *SPT) SupportsSharedfs(_ string) bool {
 	return false
 }
 
+// UsesControlSocket reports that SPT exposes no control socket.
+func (s *SPT) UsesControlSocket() bool {
+	return false
+}
+
 // Path returns the path to the spt binary.
 func (s *SPT) Path() string {
 	return s.binaryPath
