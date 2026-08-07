@@ -123,11 +123,21 @@ Firecracker (its API socket), Qemu (a QMP socket) and Cloud Hypervisor (its REST
 API socket). It has no effect on the other monitors. The control socket is
 opt-in: it exists only when `socket_path` is set. If it is not set, the
 monitor runs with no control socket at all; an operator can leave it unset if
-they do not need the socket, or to keep a smaller attack surface. When it is
-set, the monitor creates the socket inside its own (pivoted) rootfs; `urunc`
-creates the directory of a custom `socket_path` there for you, so the path
-can be anywhere. It fails cleanly if the location is invalid, for example
-when a file already exists at one of the directories in the path.
+they do not need the socket, or to keep a smaller attack surface.
+
+When it is set, the monitor creates the socket inside its own (pivoted) rootfs.
+`urunc` creates the directory of `socket_path` inside that rootfs after it drops
+privileges to the monitor's user, so the path is subject to two constraints:
+
+- Its parent directory must be one the monitor's user can create and write. A
+  directory that only `root` can write does not work for a non-root monitor.
+- It must not sit over an existing file or directory. `urunc` creates the
+  directory of `socket_path`; that fails cleanly if a file already exists at one
+  of the directories in the path. The monitor then binds the socket at
+  `socket_path`; that fails if a file already exists at `socket_path` itself.
+
+`urunc` removes the socket when the container is deleted, so a restart that
+reuses the same `socket_path` does not find a stale socket.
 
 **Example:**
 
