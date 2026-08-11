@@ -72,10 +72,8 @@ func (q *Qemu) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel) ([]str
 	cmdString += " -cpu host"                                           // Choose CPU
 	cmdString += " -enable-kvm"                                         // Enable KVM to use CPU virt extensions
 	cmdString += " -display none -vga none -serial stdio -monitor null" // Disable graphic output
-	// Expose a QMP control socket only when a socket_path is configured, so the
-	// runtime can talk to QEMU after boot (e.g. for graceful shutdown). With no
-	// configured path QEMU boots with no control socket. server,nowait lets QEMU
-	// boot without waiting for a client to connect.
+	// Expose the QMP socket only when socket_path is set. server,nowait lets
+	// QEMU boot without waiting for a client.
 	if args.SocketPath != "" {
 		cmdString += " -qmp unix:" + args.SocketPath + ",server,nowait"
 	}

@@ -719,10 +719,9 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
-	// Create the directory for the monitor's control socket, only when one is
-	// configured. This runs after setupUser so the directory is owned by the
-	// monitor's user and a non-root monitor can bind its socket there. The
-	// socket file itself is created by the monitor and removed in Delete.
+	// Create the socket directory after setupUser, so the monitor's user owns
+	// it and a non-root monitor can bind there. The monitor creates the socket;
+	// kill and Delete remove it.
 	if vmm.UsesControlSocket() && vmmArgs.SocketPath != "" {
 		sockDir := filepath.Dir(vmmArgs.SocketPath)
 		if err = os.MkdirAll(sockDir, 0o700); err != nil {
