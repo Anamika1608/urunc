@@ -24,9 +24,8 @@ import (
 
 const testCHBinary = "/usr/bin/cloud-hypervisor"
 
-// TestCloudHypervisorBuildExecCmdSocket verifies that Cloud Hypervisor exposes
-// its REST API control socket only when a socket_path is configured. With no
-// configured path, no --api-socket flag is emitted.
+// TestCloudHypervisorBuildExecCmdSocket verifies Cloud Hypervisor emits
+// --api-socket only when socket_path is set.
 func TestCloudHypervisorBuildExecCmdSocket(t *testing.T) {
 	t.Parallel()
 

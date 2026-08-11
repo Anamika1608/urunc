@@ -21,10 +21,8 @@ import (
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
 )
 
-// TestUsesControlSocket verifies every monitor reports whether it exposes a
-// control socket. The monitors that expose one (Qemu, Firecracker, Cloud
-// Hypervisor) must return true; the rest must return false. Because it is an
-// interface method, a new monitor cannot compile without declaring it.
+// TestUsesControlSocket verifies each monitor reports whether it exposes a
+// control socket (Qemu, Firecracker, Cloud Hypervisor true; the rest false).
 func TestUsesControlSocket(t *testing.T) {
 	t.Parallel()
 

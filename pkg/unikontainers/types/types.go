@@ -42,8 +42,7 @@ type VMM interface {
 	UsesKVM() bool
 	SupportsSharedfs(string) bool
 	// UsesControlSocket reports whether the monitor exposes a control socket
-	// (configured through socket_path) that urunc must make reachable before
-	// the monitor launches.
+	// (set through socket_path).
 	UsesControlSocket() bool
 	Ok() error
 }

@@ -78,10 +78,8 @@ func (q *Qemu) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel) ([]str
 		"-serial", "stdio",
 		"-monitor", "null",
 	}
-	// Expose a QMP control socket only when a socket_path is configured, so the
-	// runtime can talk to QEMU after boot (e.g. for graceful shutdown). With no
-	// configured path QEMU boots with no control socket. server,nowait lets QEMU
-	// boot without waiting for a client to connect.
+	// Expose the QMP socket only when socket_path is set. server,nowait lets
+	// QEMU boot without waiting for a client.
 	if args.SocketPath != "" {
 		exArgs = append(exArgs, "-qmp", "unix:"+args.SocketPath+",server,nowait")
 	}

@@ -24,10 +24,8 @@ import (
 
 const testFCBinary = "/usr/bin/firecracker"
 
-// TestFirecrackerBuildExecCmdSocket verifies that Firecracker enables its API
-// socket only when a socket_path is configured. With no configured path it
-// restores the upstream launch mode (--no-api --config-file), which boots the
-// guest from the config file without exposing a control socket.
+// TestFirecrackerBuildExecCmdSocket verifies Firecracker enables --api-sock
+// only when socket_path is set, and restores --no-api otherwise.
 func TestFirecrackerBuildExecCmdSocket(t *testing.T) {
 	t.Parallel()
 
