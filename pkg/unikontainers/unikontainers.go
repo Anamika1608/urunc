@@ -805,11 +805,63 @@ func setupUser(user specs.User) error {
 }
 
 // Signal sends a specified signal to container's init.
+// monitorRootfs returns the host path of the monitor's rootfs: the separate
+// one under the bundle if it exists, else the container's own rootfs.
+func (u *Unikontainer) monitorRootfs() string {
+	bundleDir := filepath.Clean(u.State.Bundle)
+	rootfsDir := filepath.Clean(u.Spec.Root.Path)
+	if !filepath.IsAbs(rootfsDir) {
+		rootfsDir = filepath.Join(bundleDir, rootfsDir)
+	}
+	monRootfs := filepath.Join(bundleDir, monitorRootfsDirName)
+	if _, err := os.Stat(monRootfs); !os.IsNotExist(err) {
+		return monRootfs
+	}
+	return rootfsDir
+}
+
+// removeControlSocket deletes the monitor's control socket, if one is set. It
+// skips a missing path and never deletes a non-socket file. Signal (on a
+// lethal signal) and Delete both use it.
+func (u *Unikontainer) removeControlSocket(vmm types.VMM, vmmType string) error {
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
+	if socketPath == "" || !vmm.UsesControlSocket() {
+		return nil
+	}
+	sockRealPath := filepath.Join(u.monitorRootfs(), socketPath)
+	info, err := os.Lstat(sockRealPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return nil
+	}
+	return os.Remove(sockRealPath)
+}
+
+// isLethalSignal reports whether the signal stops the container. Only SIGKILL
+// and SIGTERM count (the signals a stop sends).
+func isLethalSignal(signal unix.Signal) bool {
+	return signal == unix.SIGKILL || signal == unix.SIGTERM
+}
+
 func (u *Unikontainer) Signal(signal unix.Signal) error {
 	vmmType := u.State.Annotations[annotHypervisor]
 	vmm, err := hypervisors.NewVMM(hypervisors.VmmType(vmmType), u.UruncCfg.Monitors)
 	if err != nil {
 		return err
+	}
+
+	// A stop calls kill with SIGTERM and never runs Delete, so remove the
+	// socket here too, while the monitor is still alive. Best-effort: never
+	// block the kill.
+	if isLethalSignal(signal) {
+		if rmErr := u.removeControlSocket(vmm, vmmType); rmErr != nil {
+			uniklog.Warnf("failed to remove control socket: %v", rmErr)
+		}
 	}
 
 	return vmm.Signal(u.State.Pid, signal)
@@ -856,7 +908,6 @@ func (u *Unikontainer) Kill() error {
 func (u *Unikontainer) Delete() error {
 	var dirs []string
 	var prefPath string
-	var monitorRoot string
 
 	if u.isRunning() {
 		return fmt.Errorf("cannot delete running container: %s", u.State.ID)
@@ -904,7 +955,6 @@ func (u *Unikontainer) Delete() error {
 		// clean it up.
 		dirs = append(dirs, monitorRootfsDirName)
 		prefPath = bundleDir
-		monitorRoot = monRootfs
 	} else {
 		// Otherwise remove the enw directories we created inside the
 		// container's rootfs.
@@ -921,22 +971,11 @@ func (u *Unikontainer) Delete() error {
 		}
 		dirs = append(dirs, vmm.Path())
 		prefPath = rootfsDir
-		monitorRoot = rootfsDir
 	}
 
-	// Remove the monitor's control socket, if one was configured, so that a
-	// restart reusing the same socket_path does not find a stale socket. The
-	// socket lives inside the monitor rootfs (the monitor binds it there after
-	// the pivot in Exec); at delete time that rootfs is reachable at its real
-	// path. Only an actual socket is removed, so a misconfigured socket_path
-	// pointing at a regular file is never deleted.
-	if socketPath := u.UruncCfg.Monitors[vmmType].SocketPath; socketPath != "" && vmm.UsesControlSocket() {
-		sockRealPath := filepath.Join(monitorRoot, socketPath)
-		if info, statErr := os.Lstat(sockRealPath); statErr == nil && info.Mode()&os.ModeSocket != 0 {
-			if err = os.Remove(sockRealPath); err != nil {
-				return fmt.Errorf("failed to remove control socket %q: %w", sockRealPath, err)
-			}
-		}
+	// Remove the control socket so a restart on the same socket_path is clean.
+	if err = u.removeControlSocket(vmm, vmmType); err != nil {
+		return fmt.Errorf("failed to remove control socket: %w", err)
 	}
 
 	err = rmMultipleDirs(prefPath, dirs)

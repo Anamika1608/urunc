@@ -136,8 +136,9 @@ privileges to the monitor's user, so the path is subject to two constraints:
   of the directories in the path. The monitor then binds the socket at
   `socket_path`; that fails if a file already exists at `socket_path` itself.
 
-`urunc` removes the socket when the container is deleted, so a restart that
-reuses the same `socket_path` does not find a stale socket.
+`urunc` removes the socket when the container is stopped (on a terminating
+signal) and when it is deleted, so a restart that reuses the same `socket_path`
+does not find a stale socket.
 
 **Example:**
 
