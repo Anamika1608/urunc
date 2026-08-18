@@ -722,7 +722,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// Create the socket directory after setupUser, so the monitor's user owns
 	// it and a non-root monitor can bind there. The monitor creates the socket;
 	// kill and Delete remove it.
-	if vmm.UsesControlSocket() && vmmArgs.SocketPath != "" {
+	if vmm.SupportsControlSocket() && vmmArgs.SocketPath != "" {
 		sockDir := filepath.Dir(vmmArgs.SocketPath)
 		if err = os.MkdirAll(sockDir, 0o700); err != nil {
 			return fmt.Errorf("failed to create control socket directory %q: %w", sockDir, err)
@@ -824,7 +824,7 @@ func (u *Unikontainer) monitorRootfs() string {
 // lethal signal) and Delete both use it.
 func (u *Unikontainer) removeControlSocket(vmm types.VMM, vmmType string) error {
 	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
-	if socketPath == "" || !vmm.UsesControlSocket() {
+	if socketPath == "" || !vmm.SupportsControlSocket() {
 		return nil
 	}
 	sockRealPath := filepath.Join(u.monitorRootfs(), socketPath)

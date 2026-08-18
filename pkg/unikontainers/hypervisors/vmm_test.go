@@ -21,9 +21,9 @@ import (
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
 )
 
-// TestUsesControlSocket verifies each monitor reports whether it exposes a
+// TestSupportsControlSocket verifies each monitor reports whether it exposes a
 // control socket (Qemu, Firecracker, Cloud Hypervisor true; the rest false).
-func TestUsesControlSocket(t *testing.T) {
+func TestSupportsControlSocket(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -43,7 +43,7 @@ func TestUsesControlSocket(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, tt.vmm.UsesControlSocket())
+			assert.Equal(t, tt.want, tt.vmm.SupportsControlSocket())
 		})
 	}
 }

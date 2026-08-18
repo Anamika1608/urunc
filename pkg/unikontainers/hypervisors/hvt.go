@@ -139,8 +139,8 @@ func (h *HVT) SupportsSharedfs(_ string) bool {
 	return false
 }
 
-// UsesControlSocket reports that HVT exposes no control socket.
-func (h *HVT) UsesControlSocket() bool {
+// SupportsControlSocket reports that HVT exposes no control socket.
+func (h *HVT) SupportsControlSocket() bool {
 	return false
 }
 

@@ -51,8 +51,8 @@ func (s *SPT) SupportsSharedfs(_ string) bool {
 	return false
 }
 
-// UsesControlSocket reports that SPT exposes no control socket.
-func (s *SPT) UsesControlSocket() bool {
+// SupportsControlSocket reports that SPT exposes no control socket.
+func (s *SPT) SupportsControlSocket() bool {
 	return false
 }
 

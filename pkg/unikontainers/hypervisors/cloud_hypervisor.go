@@ -50,9 +50,9 @@ func (ch *CloudHypervisor) UsesKVM() bool {
 }
 
 // SupportsSharedfs returns true as Cloud Hypervisor supports virtiofs
-// UsesControlSocket reports that Cloud Hypervisor exposes a control socket (its
+// SupportsControlSocket reports that Cloud Hypervisor exposes a control socket (its
 // REST API socket).
-func (ch *CloudHypervisor) UsesControlSocket() bool {
+func (ch *CloudHypervisor) SupportsControlSocket() bool {
 	return true
 }
 
