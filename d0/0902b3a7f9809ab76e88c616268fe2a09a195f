@@ -1,0 +1,37 @@
+pkg/unikontainers/hypervisors/firecracker.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 100,102
+pkg/unikontainers/hypervisors/hedge.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 54-55
+pkg/unikontainers/hypervisors/vmm_test.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 24,26,46
+pkg/unikontainers/hypervisors/cloud_hypervisor.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 53,55
+pkg/unikontainers/hypervisors/spt.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 54-55
+pkg/unikontainers/hypervisors/qemu.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 59-60
+pkg/unikontainers/types/types.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 44,46
+pkg/unikontainers/unikontainers.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 725,827
+pkg/unikontainers/hypervisors/hvt.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 142-143
+pkg/unikontainers/hypervisors/hyperlight.go
+  s_ddebb8296f398a::t_b9e12d93da04a6 49-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d00902b3a7f9809ab76e88c616268fe2a09a195f",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}
