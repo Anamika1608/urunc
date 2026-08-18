@@ -29,6 +29,7 @@ import (
 	"sync"
 	"syscall"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/urunc-dev/urunc/pkg/network"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/hypervisors"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
@@ -817,14 +818,13 @@ func (u *Unikontainer) monitorRootfs() string {
 	return rootfsDir
 }
 
-// removeControlSocket deletes the monitor's control socket, if one is set. It
-// skips a missing path and never deletes a non-socket file.
-func (u *Unikontainer) removeControlSocket(vmm types.VMM, vmmType string) error {
-	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
-	if socketPath == "" || !vmm.SupportsControlSocket() {
-		return nil
+// removeControlSocket deletes the monitor's control socket. It skips a missing
+// path and never deletes a non-socket file.
+func (u *Unikontainer) removeControlSocket(socketPath string) error {
+	sockRealPath, err := securejoin.SecureJoin(u.monitorRootfs(), socketPath)
+	if err != nil {
+		return err
 	}
-	sockRealPath := filepath.Join(u.monitorRootfs(), socketPath)
 	info, err := os.Lstat(sockRealPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -855,8 +855,9 @@ func (u *Unikontainer) Signal(signal unix.Signal) error {
 	// A stop calls kill with SIGTERM and never runs Delete, so remove the
 	// socket here too, while the monitor is still alive. Best-effort: never
 	// block the kill.
-	if isLethalSignal(signal) {
-		if rmErr := u.removeControlSocket(vmm, vmmType); rmErr != nil {
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
+	if isLethalSignal(signal) && socketPath != "" && vmm.SupportsControlSocket() {
+		if rmErr := u.removeControlSocket(socketPath); rmErr != nil {
 			uniklog.Warnf("failed to remove control socket: %v", rmErr)
 		}
 	}
@@ -971,8 +972,11 @@ func (u *Unikontainer) Delete() error {
 	}
 
 	// Remove the control socket so a restart on the same socket_path is clean.
-	if err = u.removeControlSocket(vmm, vmmType); err != nil {
-		return fmt.Errorf("failed to remove control socket: %w", err)
+	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
+	if socketPath != "" && vmm.SupportsControlSocket() {
+		if err = u.removeControlSocket(socketPath); err != nil {
+			return fmt.Errorf("failed to remove control socket: %w", err)
+		}
 	}
 
 	err = rmMultipleDirs(prefPath, dirs)
