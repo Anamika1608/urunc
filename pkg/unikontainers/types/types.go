@@ -41,8 +41,6 @@ type VMM interface {
 	Path() string
 	UsesKVM() bool
 	SupportsSharedfs(string) bool
-	// SupportsControlSocket reports whether the monitor exposes a control socket
-	// (set through socket_path).
 	SupportsControlSocket() bool
 	Ok() error
 }
