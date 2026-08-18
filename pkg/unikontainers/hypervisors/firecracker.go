@@ -96,9 +96,9 @@ func (fc *Firecracker) SupportsSharedfs(_ string) bool {
 	return false
 }
 
-// UsesControlSocket reports that Firecracker exposes a control socket (its API
+// SupportsControlSocket reports that Firecracker exposes a control socket (its API
 // socket).
-func (fc *Firecracker) UsesControlSocket() bool {
+func (fc *Firecracker) SupportsControlSocket() bool {
 	return true
 }
 

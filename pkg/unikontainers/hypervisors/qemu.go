@@ -56,8 +56,8 @@ func (q *Qemu) SupportsSharedfs(_ string) bool {
 	return true
 }
 
-// UsesControlSocket reports that QEMU exposes a control socket (QMP).
-func (q *Qemu) UsesControlSocket() bool {
+// SupportsControlSocket reports that QEMU exposes a control socket (QMP).
+func (q *Qemu) SupportsControlSocket() bool {
 	return true
 }
 

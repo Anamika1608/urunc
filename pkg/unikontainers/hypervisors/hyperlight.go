@@ -46,8 +46,8 @@ func (h *Hyperlight) SupportsSharedfs(_ string) bool {
 	return false
 }
 
-// UsesControlSocket reports that Hyperlight exposes no control socket.
-func (h *Hyperlight) UsesControlSocket() bool {
+// SupportsControlSocket reports that Hyperlight exposes no control socket.
+func (h *Hyperlight) SupportsControlSocket() bool {
 	return false
 }
 
