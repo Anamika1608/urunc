@@ -720,8 +720,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 
 	// Create the socket directory after setupUser, so the monitor's user owns
-	// it and a non-root monitor can bind there. The monitor creates the socket;
-	// kill and Delete remove it.
+	// it and a non-root monitor can bind there. The monitor creates the socket.
 	if vmm.SupportsControlSocket() && vmmArgs.SocketPath != "" {
 		sockDir := filepath.Dir(vmmArgs.SocketPath)
 		if err = os.MkdirAll(sockDir, 0o700); err != nil {
@@ -803,7 +802,6 @@ func setupUser(user specs.User) error {
 	return nil
 }
 
-// Signal sends a specified signal to container's init.
 // monitorRootfs returns the host path of the monitor's rootfs: the separate
 // one under the bundle if it exists, else the container's own rootfs.
 func (u *Unikontainer) monitorRootfs() string {
@@ -820,8 +818,7 @@ func (u *Unikontainer) monitorRootfs() string {
 }
 
 // removeControlSocket deletes the monitor's control socket, if one is set. It
-// skips a missing path and never deletes a non-socket file. Signal (on a
-// lethal signal) and Delete both use it.
+// skips a missing path and never deletes a non-socket file.
 func (u *Unikontainer) removeControlSocket(vmm types.VMM, vmmType string) error {
 	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
 	if socketPath == "" || !vmm.SupportsControlSocket() {
@@ -847,6 +844,7 @@ func isLethalSignal(signal unix.Signal) bool {
 	return signal == unix.SIGKILL || signal == unix.SIGTERM
 }
 
+// Signal sends a specified signal to container's init.
 func (u *Unikontainer) Signal(signal unix.Signal) error {
 	vmmType := u.State.Annotations[annotHypervisor]
 	vmm, err := hypervisors.NewVMM(hypervisors.VmmType(vmmType), u.UruncCfg.Monitors)
