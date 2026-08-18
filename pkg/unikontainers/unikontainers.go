@@ -838,12 +838,6 @@ func (u *Unikontainer) removeControlSocket(socketPath string) error {
 	return os.Remove(sockRealPath)
 }
 
-// isLethalSignal reports whether the signal stops the container. Only SIGKILL
-// and SIGTERM count (the signals a stop sends).
-func isLethalSignal(signal unix.Signal) bool {
-	return signal == unix.SIGKILL || signal == unix.SIGTERM
-}
-
 // Signal sends a specified signal to container's init.
 func (u *Unikontainer) Signal(signal unix.Signal) error {
 	vmmType := u.State.Annotations[annotHypervisor]
@@ -852,17 +846,20 @@ func (u *Unikontainer) Signal(signal unix.Signal) error {
 		return err
 	}
 
-	// A stop calls kill with SIGTERM and never runs Delete, so remove the
-	// socket here too, while the monitor is still alive. Best-effort: never
-	// block the kill.
+	if err = vmm.Signal(u.State.Pid, signal); err != nil {
+		return err
+	}
+
+	// A stop calls kill with SIGTERM and never runs Delete, so the socket is
+	// removed here too. Best-effort: a failure must not fail the signal.
 	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
-	if isLethalSignal(signal) && socketPath != "" && vmm.SupportsControlSocket() {
+	if (signal == unix.SIGKILL || signal == unix.SIGTERM) && socketPath != "" && vmm.SupportsControlSocket() {
 		if rmErr := u.removeControlSocket(socketPath); rmErr != nil {
 			uniklog.Warnf("failed to remove control socket: %v", rmErr)
 		}
 	}
 
-	return vmm.Signal(u.State.Pid, signal)
+	return nil
 }
 
 // Kill stops the VMM process, first by asking the VMM struct to stop
