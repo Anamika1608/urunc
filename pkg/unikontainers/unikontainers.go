@@ -812,7 +812,7 @@ func (u *Unikontainer) monitorRootfs() string {
 		rootfsDir = filepath.Join(bundleDir, rootfsDir)
 	}
 	monRootfs := filepath.Join(bundleDir, monitorRootfsDirName)
-	if _, err := os.Stat(monRootfs); !os.IsNotExist(err) {
+	if _, err := os.Stat(monRootfs); err == nil {
 		return monRootfs
 	}
 	return rootfsDir
