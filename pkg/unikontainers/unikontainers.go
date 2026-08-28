@@ -839,6 +839,23 @@ func (u *Unikontainer) removeControlSocket(socketPath string) error {
 }
 
 // Signal sends a specified signal to container's init.
+func shutdownFailureReason(err error) string {
+	switch {
+	case errors.Is(err, hypervisors.ErrShutdownConnect):
+		return "could not reach the control socket"
+	case errors.Is(err, hypervisors.ErrShutdownGreeting):
+		return "the monitor did not greet us; it is busy or stuck"
+	case errors.Is(err, hypervisors.ErrShutdownHandshake):
+		return "the monitor did not finish the handshake; it is busy or stuck"
+	case errors.Is(err, hypervisors.ErrShutdownCommand):
+		return "the monitor did not answer the command; it is busy or stuck"
+	case errors.Is(err, hypervisors.ErrShutdownRefused):
+		return "the monitor refused the request"
+	default:
+		return "unknown failure"
+	}
+}
+
 func (u *Unikontainer) Signal(signal unix.Signal) error {
 	vmmType := u.State.Annotations[annotHypervisor]
 	vmm, err := hypervisors.NewVMM(hypervisors.VmmType(vmmType), u.UruncCfg.Monitors)
@@ -860,7 +877,9 @@ func (u *Unikontainer) Signal(signal unix.Signal) error {
 		vmm.SupportsGuestShutdown() {
 		hostPath := fmt.Sprintf("/proc/%d/root%s", u.State.Pid, socketPath)
 		if shutErr := vmm.RequestGuestShutdown(hostPath); shutErr != nil {
-			uniklog.WithError(shutErr).Warn("graceful shutdown failed, forwarding signal")
+			uniklog.WithError(shutErr).
+				WithField("reason", shutdownFailureReason(shutErr)).
+				Warn("graceful shutdown failed, forwarding signal")
 		} else {
 			uniklog.Debug("graceful shutdown requested via control socket")
 			requested = true

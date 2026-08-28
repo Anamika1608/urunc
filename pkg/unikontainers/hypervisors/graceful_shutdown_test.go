@@ -16,6 +16,7 @@ package hypervisors
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -48,25 +49,50 @@ func tempSocketPath(t *testing.T, name string) string {
 type qmpFakeServer struct {
 	sockPath string
 	listener net.Listener
+	cfg      qmpFakeServerConfig
 
 	mu       sync.Mutex
 	commands []string
+}
 
-	// When powerdownError is true, the server answers system_powerdown with a
-	// QMP {"error":...} object instead of a return.
-	powerdownError bool
+// qmpFakeServerConfig steers the fake server's behavior for a single
+// connection, so one server implementation can model every stage failure
+// exercised by the shutdown-stage tests below.
+type qmpFakeServerConfig struct {
+	// skipGreeting, when true, closes the connection right after accept
+	// instead of sending the QMP greeting.
+	skipGreeting bool
+
+	// errorOn, when it matches the command just received, answers with a
+	// QMP {"error":...} object instead of a return, modelling the monitor
+	// answering and rejecting the command.
+	errorOn string
+
+	// closeOn, when it matches the command just received, closes the
+	// connection without answering at all, modelling a monitor that never
+	// gets to reply for that stage.
+	closeOn string
 }
 
 func newQMPFakeServer(t *testing.T, powerdownError bool) *qmpFakeServer {
+	t.Helper()
+	cfg := qmpFakeServerConfig{}
+	if powerdownError {
+		cfg.errorOn = "system_powerdown"
+	}
+	return newQMPFakeServerWithConfig(t, cfg)
+}
+
+func newQMPFakeServerWithConfig(t *testing.T, cfg qmpFakeServerConfig) *qmpFakeServer {
 	t.Helper()
 	sockPath := tempSocketPath(t, "qmp.sock")
 	ln, err := net.Listen("unix", sockPath)
 	require.NoError(t, err)
 
 	s := &qmpFakeServer{
-		sockPath:       sockPath,
-		listener:       ln,
-		powerdownError: powerdownError,
+		sockPath: sockPath,
+		listener: ln,
+		cfg:      cfg,
 	}
 	go s.serve()
 	t.Cleanup(func() { _ = ln.Close() })
@@ -79,6 +105,10 @@ func (s *qmpFakeServer) serve() {
 		return
 	}
 	defer conn.Close()
+
+	if s.cfg.skipGreeting {
+		return
+	}
 
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
@@ -102,16 +132,16 @@ func (s *qmpFakeServer) serve() {
 		s.commands = append(s.commands, execute)
 		s.mu.Unlock()
 
-		switch execute {
-		case "qmp_capabilities":
-			_ = enc.Encode(map[string]any{"return": map[string]any{}})
-		case "system_powerdown":
-			if s.powerdownError {
-				_ = enc.Encode(map[string]any{
-					"error": map[string]any{"class": "GenericError", "desc": "boom"},
-				})
-				continue
-			}
+		if execute != "" && execute == s.cfg.closeOn {
+			return
+		}
+
+		switch {
+		case execute != "" && execute == s.cfg.errorOn:
+			_ = enc.Encode(map[string]any{
+				"error": map[string]any{"class": "GenericError", "desc": "boom"},
+			})
+		case execute == "system_powerdown":
 			// Async event first, command return second (fact G29). A correct
 			// client must skip the event and keep reading until the return.
 			_ = enc.Encode(map[string]any{
@@ -157,6 +187,79 @@ func TestQemuRequestGuestShutdown(t *testing.T) {
 	})
 }
 
+// TestQemuRequestGuestShutdownStages pins which sentinel each QMP failure
+// point wraps its error with, so an operator's log can say which step of the
+// shutdown request failed instead of one undifferentiated error.
+func TestQemuRequestGuestShutdownStages(t *testing.T) {
+	t.Run("unreachable socket gives ErrShutdownConnect", func(t *testing.T) {
+		t.Parallel()
+
+		q := &Qemu{}
+		err := q.RequestGuestShutdown(tempSocketPath(t, "does-not-exist.sock"))
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownConnect), "got: %v", err)
+	})
+
+	t.Run("no greeting gives ErrShutdownGreeting", func(t *testing.T) {
+		t.Parallel()
+
+		s := newQMPFakeServerWithConfig(t, qmpFakeServerConfig{skipGreeting: true})
+
+		q := &Qemu{}
+		err := q.RequestGuestShutdown(s.sockPath)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownGreeting), "got: %v", err)
+	})
+
+	t.Run("no reply to qmp_capabilities gives ErrShutdownHandshake", func(t *testing.T) {
+		t.Parallel()
+
+		s := newQMPFakeServerWithConfig(t, qmpFakeServerConfig{closeOn: "qmp_capabilities"})
+
+		q := &Qemu{}
+		err := q.RequestGuestShutdown(s.sockPath)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownHandshake), "got: %v", err)
+	})
+
+	t.Run("no reply to system_powerdown gives ErrShutdownCommand", func(t *testing.T) {
+		t.Parallel()
+
+		s := newQMPFakeServerWithConfig(t, qmpFakeServerConfig{closeOn: "system_powerdown"})
+
+		q := &Qemu{}
+		err := q.RequestGuestShutdown(s.sockPath)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownCommand), "got: %v", err)
+	})
+
+	t.Run("qmp_capabilities rejected gives ErrShutdownRefused", func(t *testing.T) {
+		t.Parallel()
+
+		s := newQMPFakeServerWithConfig(t, qmpFakeServerConfig{errorOn: "qmp_capabilities"})
+
+		q := &Qemu{}
+		err := q.RequestGuestShutdown(s.sockPath)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownRefused), "got: %v", err)
+		assert.False(t, errors.Is(err, ErrShutdownHandshake), "refusal must not also match the stage: %v", err)
+		assert.Contains(t, err.Error(), "qmp_capabilities")
+	})
+
+	t.Run("system_powerdown rejected gives ErrShutdownRefused", func(t *testing.T) {
+		t.Parallel()
+
+		s := newQMPFakeServerWithConfig(t, qmpFakeServerConfig{errorOn: "system_powerdown"})
+
+		q := &Qemu{}
+		err := q.RequestGuestShutdown(s.sockPath)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownRefused), "got: %v", err)
+		assert.False(t, errors.Is(err, ErrShutdownCommand), "refusal must not also match the stage: %v", err)
+		assert.Contains(t, err.Error(), "system_powerdown")
+	})
+}
+
 // TestQemuClientDrainsPowerdownReturn proves the QMP client reads until it sees
 // the command's own "return", consuming it off the wire, instead of stopping at
 // the async POWERDOWN event. net.Pipe is fully synchronous: every server write
@@ -178,13 +281,13 @@ func TestQemuGuestShutdownDrainsPowerdownReturn(t *testing.T) {
 		defer clientConn.Close()
 		enc := json.NewEncoder(clientConn)
 		dec := json.NewDecoder(clientConn)
-		if err := qmpCommand(enc, dec, "system_powerdown"); err != nil {
+		if err := qmpCommand(enc, dec, "system_powerdown", ErrShutdownCommand); err != nil {
 			done <- err
 			return
 		}
 		// Reachable only if the powerdown "return" was drained; otherwise it
 		// deadlocks against the server's still-pending return write.
-		done <- qmpCommand(enc, dec, "query-status")
+		done <- qmpCommand(enc, dec, "query-status", ErrShutdownCommand)
 	}()
 
 	senc := json.NewEncoder(serverConn)
@@ -279,6 +382,30 @@ func TestCloudHypervisorRequestGuestShutdown(t *testing.T) {
 			)
 		})
 	}
+}
+
+// TestUnixSocketRequestStages pins which sentinel unixSocketRequest wraps its
+// error with: an unreachable socket (client.Do never completes) is
+// ErrShutdownConnect, while a non-2xx response (the monitor answered and
+// rejected the request) is ErrShutdownRefused.
+func TestUnixSocketRequestStages(t *testing.T) {
+	t.Run("unreachable socket gives ErrShutdownConnect", func(t *testing.T) {
+		t.Parallel()
+
+		err := unixSocketRequest(tempSocketPath(t, "does-not-exist.sock"), http.MethodPut, "/actions", nil)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownConnect), "got: %v", err)
+	})
+
+	t.Run("400 response gives ErrShutdownRefused", func(t *testing.T) {
+		t.Parallel()
+
+		s := newCLHFakeServer(t, http.StatusBadRequest)
+
+		err := unixSocketRequest(s.sockPath, http.MethodPut, "/api/v1/vm.power-button", nil)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrShutdownRefused), "got: %v", err)
+	})
 }
 
 func TestSupportsGuestShutdown(t *testing.T) {
