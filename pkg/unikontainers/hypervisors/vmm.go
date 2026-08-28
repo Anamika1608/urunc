@@ -30,6 +30,17 @@ type VmmType string
 var ErrVMMNotInstalled = errors.New("vmm not found")
 var vmmLog = logrus.WithField("subsystem", "monitors")
 
+// Stages of a graceful-shutdown request, so a caller can report which step
+// failed. A monitor that never answers is a monitor that never got scheduled,
+// not a guest that refused, and these let a log line say so.
+var (
+	ErrShutdownConnect   = errors.New("could not reach the monitor's control socket")
+	ErrShutdownGreeting  = errors.New("the monitor did not send its greeting")
+	ErrShutdownHandshake = errors.New("the monitor did not complete the handshake")
+	ErrShutdownCommand   = errors.New("the monitor did not answer the shutdown command")
+	ErrShutdownRefused   = errors.New("the monitor refused the shutdown request")
+)
+
 type VMMFactory struct {
 	binary     string
 	createFunc func(binary, binaryPath string, vhost bool) types.VMM
