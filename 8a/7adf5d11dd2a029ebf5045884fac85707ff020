@@ -1,0 +1,21 @@
+pkg/unikontainers/hypervisors/graceful_shutdown_test.go
+  s_ddebb8296f398a::t_44fb1f5b0bc03c 387-410
+pkg/unikontainers/hypervisors/http_unix.go
+  s_ddebb8296f398a::t_1a6a5a5d5bb46c 63-65,68-69,75-76,78-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8a7adf5d11dd2a029ebf5045884fac85707ff020",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}
