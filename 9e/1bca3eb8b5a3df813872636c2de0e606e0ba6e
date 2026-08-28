@@ -1,0 +1,21 @@
+pkg/unikontainers/hypervisors/vmm.go
+  s_ddebb8296f398a::t_5073967c572c78 33-43
+pkg/unikontainers/hypervisors/shutdown_errors_test.go
+  s_ddebb8296f398a::t_318ab7552a7288 1-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9e1bca3eb8b5a3df813872636c2de0e606e0ba6e",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}
