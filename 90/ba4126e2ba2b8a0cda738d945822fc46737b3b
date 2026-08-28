@@ -1,0 +1,23 @@
+pkg/unikontainers/hypervisors/qemu_qmp.go
+  ai_agent 47,61,65,70,74-77,79,81,85-89,93,96
+pkg/unikontainers/hypervisors/graceful_shutdown_test.go
+  s_ddebb8296f398a::t_badcdc2b58fe37 52,56-64,66-74,78-86,93-95,109-112,135-144
+  s_ddebb8296f398a::t_df38ee02d4543c 284,290
+  s_ddebb8296f398a::t_57b18bf8fa9828 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "90ba4126e2ba2b8a0cda738d945822fc46737b3b",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}
