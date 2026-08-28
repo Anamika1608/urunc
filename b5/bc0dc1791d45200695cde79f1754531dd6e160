@@ -1,0 +1,20 @@
+pkg/unikontainers/unikontainers.go
+  s_ddebb8296f398a::t_0e805f4448f8d9 880-882
+  s_ddebb8296f398a::t_1d42d46f43e517 842-858
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b5bc0dc1791d45200695cde79f1754531dd6e160",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
