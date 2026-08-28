@@ -1,0 +1,19 @@
+pkg/unikontainers/hypervisors/http_unix.go
+  ai_agent 63-65,68-69,75-76,78-80
+pkg/unikontainers/hypervisors/graceful_shutdown_test.go
+  ai_agent 19,52,56,58-74,78-86,93-95,109-112,135-144,190-262,284,290,387-408
+pkg/unikontainers/hypervisors/qemu_qmp.go
+  ai_agent 47,61,65,70,74-77,79,81,85-89,93,96
+pkg/unikontainers/hypervisors/shutdown_errors_test.go
+  ai_agent 1-52
+pkg/unikontainers/hypervisors/vmm.go
+  ai_agent 33-43
+pkg/unikontainers/unikontainers.go
+  ai_agent 842-858,880-882
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4bda43d0bb291a976b68f49bd4aa88f024dd5063",
+  "prompts": {}
+}
