@@ -1,0 +1,26 @@
+pkg/unikontainers/hypervisors/firecracker.go
+  s_ddebb8296f398a::t_ccfefe045b0204 309-311
+  s_ddebb8296f398a::t_51b76d9e7ae209 274
+  s_ddebb8296f398a::t_32b291758fe9fc 147-148
+  s_ddebb8296f398a::t_54a9b57f19960f 228-229
+  s_ddebb8296f398a::t_2416cc1f9c58a6 337-340,342-343
+  s_ddebb8296f398a::t_9fc5085ac735a0 331
+  s_ddebb8296f398a::t_688430cf1ca14c 294-295
+  s_ddebb8296f398a::t_da5be07744210f 235-238,241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3e90ca7ba6d972ea875c7c6af1bd536219a70e61",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}
