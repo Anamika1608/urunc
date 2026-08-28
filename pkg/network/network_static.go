@@ -88,9 +88,6 @@ func setNATRule(iface string, sourceIP string) error {
 	return nil
 }
 
-// HasNetwork checks, cheaply, whether a container network interface exists
-// in the current netns, without creating the tap device or doing any of the
-// other, more expensive setup NetworkSetup does.
 func (n StaticNetwork) HasNetwork() (bool, error) {
 	_, err := discoverContainerIface()
 	if err != nil {

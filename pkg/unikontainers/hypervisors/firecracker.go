@@ -118,8 +118,6 @@ func (fc *Firecracker) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel
 	cmdString := fc.Path() + " --api-sock " + apiSockPath
 	JSONConfigFile := filepath.Join("/tmp/", FCJsonFilename)
 	if args.BootMode == "config-file" {
-		// config-file-based: Firecracker boots itself from the JSON config file
-		// below; the socket stays open only for use after the guest is running.
 		cmdString += " --config-file " + JSONConfigFile
 	}
 	if !args.Seccomp {
@@ -140,16 +138,12 @@ func (fc *Firecracker) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel
 	return exArgs, nil
 }
 
-// PreExec performs pre-execution setup. Firecracker has no special pre-exec requirements.
 func (fc *Firecracker) PreExec(_ types.ExecArgs) error {
 	return nil
 }
 
-// buildFirecrackerConfig builds the microVM configuration from args and
-// ukernel. Used both to write the JSON config file (config-file-based boot)
-// and to drive the same configuration over the API socket (API-based boot),
-// so both paths always agree on what the guest actually gets configured
-// with.
+// buildFirecrackerConfig builds the microVM configuration. Both boot modes
+// use it, so they always configure the guest the same way.
 func buildFirecrackerConfig(args types.ExecArgs, ukernel types.Unikernel) *FirecrackerConfig {
 	// VM config for Firecracker
 	fcMem := DefaultMemory
@@ -229,32 +223,18 @@ func buildFirecrackerConfig(args types.ExecArgs, ukernel types.Unikernel) *Firec
 	}
 }
 
-// FirecrackerSession is a Firecracker child process configured over its API
-// socket, one resource at a time. Create it with SpawnSocketVMM, send the
-// configuration with the Configure* methods, boot the guest with StartGuest
-// once the caller's start handshake allows it, then hand the calling process
-// over with Supervise.
+// FirecrackerSession is a Firecracker child process that urunc configures
+// over its API socket, one resource at a time.
 type FirecrackerSession struct {
 	cmd    *exec.Cmd
 	client *firecrackerClient
 }
 
-// SpawnSocketVMM starts Firecracker as a child process with only its API
-// socket enabled, and establishes the single persistent connection all later
-// configuration stages use.
-//
-// This is called after changeRoot, so the child inherits the already-pivoted
-// root: its control socket and every path it opens live inside the monitor
-// rootfs, the same confinement the exec path gets. It also inherits the
-// sandbox's network namespace, which Exec has already joined. The caller is
-// still privileged here and only drops its own privileges just after
-// (setupUser), so when uid/gid are non-zero the child is started directly
-// under that credential.
+// SpawnSocketVMM starts Firecracker with only its API socket. It must run
+// after changeRoot, so the socket stays inside the monitor rootfs.
 func (fc *Firecracker) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*FirecrackerSession, error) {
 	socketPath := ResolveSocketPath(args)
-	// Firecracker binds this path itself; a stale socket file left from an
-	// earlier run (e.g. a crash) would make its bind fail with "address
-	// already in use", so remove any leftover first.
+	// Firecracker binds this path, and a leftover file makes the bind fail.
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to remove stale socket %q: %w", socketPath, err)
 	}
@@ -287,9 +267,7 @@ func (fc *Firecracker) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*Fi
 	return &FirecrackerSession{cmd: cmd, client: client}, nil
 }
 
-// ConfigureMachine sends the vCPU/memory configuration. Nothing but the
-// container spec is needed for this, so it is the first stage, sent right
-// after the spawn.
+// ConfigureMachine sends the vCPU and memory configuration.
 func (s *FirecrackerSession) ConfigureMachine(ctx context.Context, args types.ExecArgs) error {
 	fcMem := DefaultMemory
 	if args.MemSizeB != 0 {
@@ -309,8 +287,8 @@ func (s *FirecrackerSession) ConfigureMachine(ctx context.Context, args types.Ex
 }
 
 // ConfigureNetwork attaches the container's network interface. Firecracker
-// opens the tap device during this call, so it must only run once the
-// network setup that creates the tap has finished. No-op without a tap.
+// opens the tap device here, so the tap must exist first. It does nothing
+// when there is no tap.
 func (s *FirecrackerSession) ConfigureNetwork(ctx context.Context, net types.NetDevParams) error {
 	if net.TapDev == "" {
 		return nil
@@ -324,12 +302,9 @@ func (s *FirecrackerSession) ConfigureNetwork(ctx context.Context, net types.Net
 	return s.client.putNetworkIface(ctx, iface)
 }
 
-// ConfigureGuest sends everything that depends on unikernel.Init having run:
-// the block devices (their IDs/paths come from the unikernel's
-// MonitorBlockCli), the boot source (its boot args are the unikernel command
-// line, which bakes in the resolved network), and the vsock device if any.
-// The child runs inside the monitor rootfs, so every path is sent exactly as
-// the exec path would use it.
+// ConfigureGuest sends the block devices, the boot source and the vsock
+// device. It must run after unikernel.Init, which produces the block device
+// list and the boot arguments.
 func (s *FirecrackerSession) ConfigureGuest(ctx context.Context, args types.ExecArgs, ukernel types.Unikernel) error {
 	cfg := buildFirecrackerConfig(args, ukernel)
 
@@ -349,25 +324,17 @@ func (s *FirecrackerSession) StartGuest(ctx context.Context) error {
 	return s.client.startGuest(ctx)
 }
 
-// Kill terminates the child and reaps it. For error paths before Supervise.
+// Kill terminates the child process and reaps it.
 func (s *FirecrackerSession) Kill() {
 	_ = s.cmd.Process.Kill()
 	_, _ = s.cmd.Process.Wait()
 }
 
-// Supervise hands the calling process over to the child for the rest of its
-// life: it forwards SIGTERM/SIGINT and, once the child exits, exits this
-// process with the child's exit code, mirroring the semantics syscall.Exec
-// would have had. The caller must not exit before the child, since it is
-// the container's init process.
-//
-// On success this function does not return: it calls os.Exit with the
-// child's exit status once the child exits.
+// Supervise forwards signals to Firecracker and exits with its exit code once
+// it exits. It does not return on success.
 func (s *FirecrackerSession) Supervise() error {
-	// Forward the signals containerd would send to stop the container.
-	// SIGKILL cannot be caught, so it is not listed here: if it arrives,
-	// this process dies immediately and the child is left running, a known
-	// gap for this bounded experiment, not yet handled.
+	// Forward the signals that stop a container. SIGKILL cannot be caught,
+	// so this process dies at once and leaves Firecracker running.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {

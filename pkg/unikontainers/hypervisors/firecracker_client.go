@@ -26,15 +26,8 @@ import (
 	"time"
 )
 
-// firecrackerClient drives a running Firecracker process over its HTTP-over-Unix
-// API socket, one configuration resource at a time.
-//
-// The client establishes a single connection in connect() and keeps it alive
-// for all requests, so every configuration stage reuses the connection whose
-// readiness connect() already waited for, instead of re-dialing.
-//
-// This type is the API driver only; starting (and owning) the Firecracker
-// process is handled by the caller (see SpawnSocketVMM).
+// firecrackerClient drives a running Firecracker process over its HTTP API on
+// a unix socket. connect() opens one connection, and every request reuses it.
 type firecrackerClient struct {
 	socketPath string
 	httpClient *http.Client
@@ -43,15 +36,13 @@ type firecrackerClient struct {
 	heldConn net.Conn
 }
 
-// newFirecrackerClient returns a client that talks to the Firecracker API socket
-// at socketPath. "http://localhost/<endpoint>" requests actually travel over the
-// socket. Call connect() before issuing any request.
+// newFirecrackerClient returns a client for the API socket at socketPath.
+// Requests are addressed to "http://localhost" but travel over that socket.
 func newFirecrackerClient(socketPath string) *firecrackerClient {
 	c := &firecrackerClient{socketPath: socketPath}
 	transport := &http.Transport{
 		DialContext: c.dialContext,
-		// Keep the single connection alive for the whole staged boot so an
-		// idle close between stages does not force a re-dial.
+		// Keep the connection alive between stages, so no stage re-dials.
 		IdleConnTimeout:     0,
 		MaxIdleConns:        1,
 		MaxIdleConnsPerHost: 1,
@@ -60,9 +51,8 @@ func newFirecrackerClient(socketPath string) *firecrackerClient {
 	return c
 }
 
-// dialContext hands the transport the connection pre-established by connect(),
-// and falls back to dialing the socket path directly if that connection was
-// already consumed.
+// dialContext hands over the connection connect() made, or dials again if it
+// was already used.
 func (c *firecrackerClient) dialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	c.dialMu.Lock()
 	defer c.dialMu.Unlock()
@@ -75,10 +65,8 @@ func (c *firecrackerClient) dialContext(ctx context.Context, _, _ string) (net.C
 	return d.DialContext(ctx, "unix", c.socketPath)
 }
 
-// connect blocks until the Firecracker API socket exists and accepts
-// connections, or the timeout elapses. Firecracker creates the socket shortly
-// after it starts. The successful connection is kept and reused for all
-// requests (see the type comment for why).
+// connect blocks until the Firecracker API socket accepts connections, or the
+// timeout elapses. It keeps the connection for the requests that follow.
 func (c *firecrackerClient) connect(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -91,9 +79,7 @@ func (c *firecrackerClient) connect(timeout time.Duration) error {
 			return nil
 		}
 		lastErr = err
-		// Firecracker binds the socket within ~1ms of starting, so poll
-		// tightly: a 1ms interval captures nearly all of the readiness
-		// latency a coarser interval would waste, without busy-spinning.
+		// Firecracker binds the socket within about 1ms of starting.
 		time.Sleep(1 * time.Millisecond)
 	}
 	if lastErr == nil {
@@ -102,8 +88,6 @@ func (c *firecrackerClient) connect(timeout time.Duration) error {
 	return fmt.Errorf("firecracker API socket %q not ready within %s: %w", c.socketPath, timeout, lastErr)
 }
 
-// putMachineConfig configures vCPUs and memory. This needs nothing but the
-// container spec, so it can be sent as the very first stage.
 func (c *firecrackerClient) putMachineConfig(ctx context.Context, machine FirecrackerMachine) error {
 	return c.put(ctx, "/machine-config", machine)
 }
@@ -114,7 +98,6 @@ func (c *firecrackerClient) putNetworkIface(ctx context.Context, iface Firecrack
 	return c.put(ctx, "/network-interfaces/"+iface.IfaceID, iface)
 }
 
-// putDrives attaches the guest's block devices.
 func (c *firecrackerClient) putDrives(ctx context.Context, drives []FirecrackerDrive) error {
 	for _, drive := range drives {
 		if err := c.put(ctx, "/drives/"+drive.DriveID, drive); err != nil {
@@ -124,12 +107,10 @@ func (c *firecrackerClient) putDrives(ctx context.Context, drives []FirecrackerD
 	return nil
 }
 
-// putBootSource configures the kernel image, boot arguments and initrd.
 func (c *firecrackerClient) putBootSource(ctx context.Context, source FirecrackerBootSource) error {
 	return c.put(ctx, "/boot-source", source)
 }
 
-// putVSock configures the vsock device. No-op when unset (empty uds_path).
 func (c *firecrackerClient) putVSock(ctx context.Context, vsock FirecrackerVSockDev) error {
 	if vsock.UDSPath == "" {
 		return nil
@@ -137,14 +118,11 @@ func (c *firecrackerClient) putVSock(ctx context.Context, vsock FirecrackerVSock
 	return c.put(ctx, "/vsock", vsock)
 }
 
-// startGuest issues the InstanceStart action, which powers on the microVM and
-// boots the guest. Firecracker allows this to succeed only once.
+// startGuest boots the guest. Firecracker accepts this only once.
 func (c *firecrackerClient) startGuest(ctx context.Context) error {
 	return c.put(ctx, "/actions", map[string]string{"action_type": "InstanceStart"})
 }
 
-// put marshals body to JSON and sends it as an HTTP PUT to the given API path
-// over the Unix socket, returning an error for any non-2xx response.
 func (c *firecrackerClient) put(ctx context.Context, path string, body any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {

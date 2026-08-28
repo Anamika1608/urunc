@@ -73,9 +73,6 @@ func BytesToStringMB(argMem uint64) string {
 // no socket_path is configured. It always exists inside the monitor rootfs.
 const DefaultSocketDir = "/tmp"
 
-// ResolveSocketPath returns the path for a monitor's control socket: the
-// configured SocketPath when set, otherwise a per-container default under
-// DefaultSocketDir.
 func ResolveSocketPath(args types.ExecArgs) string {
 	if args.SocketPath != "" {
 		return args.SocketPath

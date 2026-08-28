@@ -288,10 +288,6 @@ func (u *Unikontainer) SetupNet() (types.NetDevParams, error) {
 	return netArgs, nil
 }
 
-// HasNetwork does a cheap check for whether this container has a network
-// interface to configure, without doing the more expensive tap device
-// creation and configuration that SetupNet does. It exists so callers can
-// learn this fact early, while the full SetupNet runs concurrently.
 func (u *Unikontainer) HasNetwork() (bool, error) {
 	networkType := u.getNetworkType()
 	netManager, err := network.NewNetworkManager(networkType)
@@ -555,22 +551,8 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		unikernelParams.CmdLine = strings.Fields(u.State.Annotations[annotCmdLine])
 	}
 
-	// handle network
-	//
-	// For Firecracker's API-based boot mode, the VMM is spawned right after
-	// changeRoot below, so the monitor and its control socket are confined
-	// inside the monitor rootfs, exactly like the exec path. Everything the
-	// VMM needs to be told is known by that point, so its configuration is
-	// sent over the socket in one sequence; only InstanceStart waits for
-	// the start-success handshake, preserving OCI start ordering.
-	//
-	// Rootfs prep (below) only needs the cheap "does this container have a
-	// network interface" fact, not the fully finished network setup (see
-	// prepareMonRootfs's needsTAP argument below), so the real SetupNet runs
-	// concurrently with rootfs prep, joined right before unikernel.Init,
-	// since every supported unikernel type bakes the resolved IP/gateway/MAC
-	// into the guest's boot command line. For every other case, this stays
-	// exactly as sequential as today.
+	// In api boot mode, SetupNet runs concurrently with the rootfs prep below,
+	// which only needs to know whether a network interface exists.
 	isAPIBoot := vmmType == string(hypervisors.FirecrackerVmm) && bootMode != "config-file"
 
 	var netArgs types.NetDevParams
@@ -581,9 +563,8 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	var fcSession *hypervisors.FirecrackerSession
 	fcHandedOff := false
 	defer func() {
-		// Any error return after the spawn must not leave the VMM child
-		// behind. Supervise never returns (os.Exit), so this only fires on
-		// error paths.
+		// Supervise never returns, so this only runs when Exec fails after
+		// the spawn.
 		if fcSession != nil && !fcHandedOff {
 			fcSession.Kill()
 		}
@@ -745,10 +726,8 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 	vmmArgs.Sharedfs = sharedfsArgs
 
-	// If network setup is still running concurrently (isAPIBoot), this is
-	// where we actually need its result: every supported unikernel type
-	// bakes the resolved IP/gateway/MAC into the guest's boot command line
-	// inside Init below.
+	// unikernel.Init below bakes the resolved IP, gateway and MAC into the
+	// guest command line, so the concurrent network setup must be finished.
 	if isAPIBoot {
 		netWG.Wait()
 		if netSetupErr != nil {
@@ -795,12 +774,6 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
-	// For the API-based boot the monitor is spawned here, after changeRoot,
-	// so the child inherits the pivoted root: its control socket and every
-	// path it opens (kernel, initrd, drives, vsock) resolve inside the
-	// monitor rootfs. urunc is still privileged at this point; the child
-	// is started directly under the container user's credentials, and urunc
-	// drops its own privileges right after (setupUser below).
 	if isAPIBoot {
 		fcSession, err = fcVmm.SpawnSocketVMM(vmmArgs, procAttrs.UID, procAttrs.GID)
 		if err != nil {
@@ -879,9 +852,6 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	}
 
 	if isAPIBoot {
-		// The VMM is configured; boot the guest and hand this process over
-		// to supervising the child. This process must not exit before the
-		// child, since it is the container's init process.
 		if err = fcSession.StartGuest(ctx); err != nil {
 			uniklog.Errorf("failed to start the guest: %v", err)
 			return err
@@ -895,11 +865,6 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	return syscall.Exec(vmm.Path(), execCmd, vmmArgs.Environment) //nolint: gosec
 }
 
-// ensureSocketDir creates the directory of the monitor's control socket so the
-// monitor can bind its socket there. For a custom socket_path this may be a
-// directory that does not exist yet; MkdirAll fails only if the location is
-// invalid (e.g. a file already exists on the path). No-op for monitors without
-// a control socket.
 func ensureSocketDir(vmmType string, vmmArgs types.ExecArgs) error {
 	if !hypervisors.UsesControlSocket(hypervisors.VmmType(vmmType)) {
 		return nil

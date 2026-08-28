@@ -38,10 +38,6 @@ type UnikernelNetworkInfo struct {
 	EthDevice Interface
 }
 type Manager interface {
-	// HasNetwork does a cheap check for whether this container has a network
-	// interface to configure, without doing the more expensive tap device
-	// creation and configuration. It lets callers learn this fact early,
-	// before the full NetworkSetup (which does the expensive work) finishes.
 	HasNetwork() (bool, error)
 	NetworkSetup(uid uint32, gid uint32) (*UnikernelNetworkInfo, error)
 }
@@ -135,18 +131,6 @@ func createTapDevice(name string, mtu int, ownerUID, ownerGID uint32) (netlink.L
 		if err != nil {
 			return nil, fmt.Errorf("failed to close the fd of tap %s: %w", name, err)
 		}
-	}
-
-	// LinkAdd opens the tap device's file descriptor with O_CLOEXEC and sets
-	// TUNSETPERSIST, so the interface survives independent of any open fd.
-	// We don't need to keep it open past this point (the rest of setup, and
-	// whatever process later attaches to this tap by name, uses netlink/its
-	// own independent open, not this fd) - closing it now, rather than
-	// relying on a future exec to do it, matters because a process that
-	// keeps this fd open (instead of exec-ing away) would otherwise block
-	// anything else from opening the same single-queue tap device.
-	for _, tapFd := range tapLink.Fds {
-		_ = tapFd.Close()
 	}
 
 	err = netlink.LinkSetMTU(tapLink, mtu)
