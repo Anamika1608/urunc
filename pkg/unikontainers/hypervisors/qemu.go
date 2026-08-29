@@ -73,9 +73,7 @@ func (q *Qemu) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel) ([]str
 	cmdString += " -cpu host"                                           // Choose CPU
 	cmdString += " -enable-kvm"                                         // Enable KVM to use CPU virt extensions
 	cmdString += " -display none -vga none -serial stdio -monitor null" // Disable graphic output
-	// Expose a QMP control socket so the runtime can talk to QEMU after boot
-	// (e.g. for graceful shutdown). server,nowait lets QEMU boot without
-	// waiting for a client to connect.
+	// server,nowait lets QEMU boot without waiting for a client to connect.
 	cmdString += " -qmp unix:" + ResolveSocketPath(args) + ",server,nowait"
 
 	if args.VCPUs > 0 {
@@ -157,26 +155,19 @@ func (q *Qemu) BuildExecCmd(args types.ExecArgs, ukernel types.Unikernel) ([]str
 	return exArgs, nil
 }
 
-// PreExec performs pre-execution setup. QEMU has no special pre-exec requirements.
 func (q *Qemu) PreExec(_ types.ExecArgs) error {
 	return nil
 }
 
 // QemuSession is a QEMU child process started with its CPUs frozen (-S) and
-// controlled over its QMP socket. Create it with SpawnPausedVMM, start the
-// guest with Resume once the caller's start handshake allows it, then hand
-// the calling process over with Supervise.
+// controlled over its QMP socket.
 type QemuSession struct {
 	cmd    *exec.Cmd
 	client *qmpClient
 }
 
-// SpawnPausedVMM starts QEMU as a supervised child with the guest frozen (-S)
-// and performs the QMP handshake over the control socket. It is called after
-// changeRoot, so the child inherits the pivoted root and its QMP socket lives
-// inside the monitor rootfs. The caller is still privileged here and only
-// drops its own privileges afterwards, so when uid/gid are non-zero the child
-// is started directly under that credential.
+// SpawnPausedVMM starts QEMU with its CPUs frozen (-S). It must run after
+// changeRoot, so the QMP socket stays inside the monitor rootfs.
 func (q *Qemu) SpawnPausedVMM(args types.ExecArgs, ukernel types.Unikernel, uid, gid uint32) (*QemuSession, error) {
 	execCmd, err := q.BuildExecCmd(args, ukernel)
 	if err != nil {
@@ -185,8 +176,7 @@ func (q *Qemu) SpawnPausedVMM(args types.ExecArgs, ukernel types.Unikernel, uid,
 	execCmd = append(execCmd, "-S")
 
 	socketPath := ResolveSocketPath(args)
-	// QEMU binds the QMP socket itself; a stale file left from an earlier run
-	// would make its bind fail, so remove any leftover first.
+	// QEMU binds this path, and a leftover file makes the bind fail.
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to remove stale socket %q: %w", socketPath, err)
 	}
@@ -221,7 +211,7 @@ func (s *QemuSession) Resume() error {
 	return s.client.execute("cont")
 }
 
-// Kill terminates the child and reaps it. For error paths before Supervise.
+// Kill terminates the child process and reaps it.
 func (s *QemuSession) Kill() {
 	if s.client != nil {
 		s.client.close()
@@ -230,19 +220,11 @@ func (s *QemuSession) Kill() {
 	_, _ = s.cmd.Process.Wait()
 }
 
-// Supervise hands the calling process over to the child for the rest of its
-// life: it forwards SIGTERM/SIGINT and, once the child exits, exits this
-// process with the child's exit code, mirroring the semantics syscall.Exec
-// would have had. The caller must not exit before the child, since it is
-// the container's init process.
-//
-// On success this function does not return: it calls os.Exit with the
-// child's exit status once the child exits.
+// Supervise forwards signals to QEMU and exits with its exit code once it
+// exits. It does not return on success.
 func (s *QemuSession) Supervise() error {
-	// Forward the signals containerd would send to stop the container.
-	// SIGKILL cannot be caught, so it is not listed here: if it arrives,
-	// this process dies immediately and the child is left running, a known
-	// gap for this bounded experiment, not yet handled.
+	// Forward the signals that stop a container. SIGKILL cannot be caught,
+	// so this process dies at once and leaves QEMU running.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {

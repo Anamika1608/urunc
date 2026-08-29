@@ -22,19 +22,15 @@ import (
 	"time"
 )
 
-// qmpClient drives a running QEMU process over its QMP control socket
-// (line-delimited JSON over a Unix socket). It implements only what urunc
-// needs: the connection handshake with capability negotiation, and single
-// commands such as cont for resuming a guest that was started frozen (-S).
+// qmpClient drives a running QEMU process over its QMP socket, which carries
+// line-delimited JSON. It implements only what urunc needs.
 type qmpClient struct {
 	conn net.Conn
 	rd   *bufio.Reader
 }
 
-// connectQMP blocks until the QMP socket accepts a connection, then performs
-// the mandatory handshake: read the server greeting, negotiate
-// qmp_capabilities. QEMU binds the socket shortly after it starts, so the
-// dial is retried tightly until the timeout elapses.
+// connectQMP blocks until the QMP socket accepts a connection, then runs the
+// handshake. QMP requires it before any command.
 func connectQMP(socketPath string, timeout time.Duration) (*qmpClient, error) {
 	deadline := time.Now().Add(timeout)
 	var conn net.Conn
@@ -74,7 +70,6 @@ func connectQMP(socketPath string, timeout time.Duration) (*qmpClient, error) {
 	return c, nil
 }
 
-// execute sends one argument-less QMP command and waits for its result.
 func (c *qmpClient) execute(command string) error {
 	_ = c.conn.SetDeadline(time.Now().Add(5 * time.Second))
 	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
