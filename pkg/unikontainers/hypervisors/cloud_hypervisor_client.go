@@ -26,13 +26,8 @@ import (
 	"time"
 )
 
-// chAPIClient drives a running Cloud Hypervisor process over its HTTP-over-Unix
-// REST API socket. urunc uses it to create the whole VM configuration in one
-// request and boot the guest when the start handshake allows it.
-//
-// The client establishes a single connection in connect() and keeps it alive
-// for all requests, so every request reuses the connection whose readiness
-// connect() already waited for, instead of re-dialing.
+// chAPIClient drives a running Cloud Hypervisor process over its HTTP API on a
+// unix socket. connect() opens one connection, and every request reuses it.
 type chAPIClient struct {
 	socketPath string
 	httpClient *http.Client
@@ -53,9 +48,8 @@ func newCHAPIClient(socketPath string) *chAPIClient {
 	return c
 }
 
-// dialContext hands the transport the connection pre-established by connect(),
-// and falls back to dialing the socket path directly if that connection was
-// already consumed.
+// dialContext hands over the connection connect() made, or dials again if it
+// was already used.
 func (c *chAPIClient) dialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	c.dialMu.Lock()
 	defer c.dialMu.Unlock()
@@ -68,9 +62,8 @@ func (c *chAPIClient) dialContext(ctx context.Context, _, _ string) (net.Conn, e
 	return d.DialContext(ctx, "unix", c.socketPath)
 }
 
-// connect blocks until the API socket exists and accepts connections, or the
-// timeout elapses. Cloud Hypervisor creates the socket shortly after it
-// starts, so the dial is retried tightly.
+// connect blocks until the API socket accepts connections, or the timeout
+// elapses. It keeps the connection for the requests that follow.
 func (c *chAPIClient) connect(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -91,19 +84,16 @@ func (c *chAPIClient) connect(timeout time.Duration) error {
 	return fmt.Errorf("cloud-hypervisor API socket %q not ready within %s: %w", c.socketPath, timeout, lastErr)
 }
 
-// createVM sends the full VM configuration.
 func (c *chAPIClient) createVM(ctx context.Context, cfg *CHVMConfig) error {
 	return c.put(ctx, "/api/v1/vm.create", cfg)
 }
 
-// bootVM boots the created VM.
 func (c *chAPIClient) bootVM(ctx context.Context) error {
 	return c.put(ctx, "/api/v1/vm.boot", nil)
 }
 
-// put sends body as an HTTP PUT to the given API path over the Unix socket,
-// returning an error for any non-2xx response. A nil body sends an empty
-// request.
+// put sends body as an HTTP PUT over the Unix socket and returns an error
+// for any non-2xx response. A nil body sends an empty request.
 func (c *chAPIClient) put(ctx context.Context, path string, body any) error {
 	var payload []byte
 	if body != nil {
