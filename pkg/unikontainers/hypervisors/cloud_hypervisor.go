@@ -77,8 +77,6 @@ func (ch *CloudHypervisor) BuildExecCmd(args types.ExecArgs, ukernel types.Unike
 	// Start building the command
 	exArgs := []string{ch.binaryPath}
 
-	// Expose the REST API over a control socket so the runtime can talk to
-	// Cloud Hypervisor after boot (e.g. for graceful shutdown).
 	exArgs = append(exArgs, "--api-socket", "path="+ResolveSocketPath(args))
 
 	// Memory configuration
@@ -171,9 +169,8 @@ func (ch *CloudHypervisor) PreExec(_ types.ExecArgs) error {
 	return nil
 }
 
-// The following types mirror the subset of Cloud Hypervisor's REST VmConfig
-// that urunc's command-line boot already uses (verified against the installed
-// cloud-hypervisor v53 API).
+// These types mirror the part of Cloud Hypervisor's REST VmConfig that the
+// command-line boot already uses. Checked against cloud-hypervisor v53.
 
 type CHPayload struct {
 	Kernel    string `json:"kernel,omitempty"`
@@ -228,9 +225,8 @@ type CHVMConfig struct {
 	Console *CHConsole `json:"console,omitempty"`
 }
 
-// buildCHVMConfig maps the same data BuildExecCmd puts on the command line
-// into the REST VmConfig. Unikernel-specific raw CLI argument strings cannot
-// be mapped to JSON, so they yield an error instead of being dropped.
+// buildCHVMConfig maps the command-line data into the REST VmConfig. Raw CLI
+// argument strings have no JSON form, so they return an error.
 func buildCHVMConfig(args types.ExecArgs, ukernel types.Unikernel) (*CHVMConfig, error) {
 	mem := args.MemSizeB
 	if mem < 1<<20 {
@@ -281,24 +277,18 @@ func buildCHVMConfig(args types.ExecArgs, ukernel types.Unikernel) (*CHVMConfig,
 	return cfg, nil
 }
 
-// CHSession is a Cloud Hypervisor child process driven over its REST API
-// socket. Create it with SpawnSocketVMM, send the full configuration with
-// ConfigureVM, boot the guest with BootVM once the caller's start handshake
-// allows it, then hand the calling process over with Supervise.
+// CHSession is a Cloud Hypervisor child process that urunc drives over its
+// REST API socket.
 type CHSession struct {
 	cmd    *exec.Cmd
 	client *chAPIClient
 }
 
-// SpawnSocketVMM starts Cloud Hypervisor as a supervised child with only its
-// API socket enabled. It is called after changeRoot, so the child inherits
-// the pivoted root and its socket lives inside the monitor rootfs. The
-// caller is still privileged here and only drops its own privileges
-// afterwards, so when uid/gid are non-zero the child is started directly
-// under that credential.
+// SpawnSocketVMM starts Cloud Hypervisor with only its API socket. It must
+// run after changeRoot, so the socket stays inside the monitor rootfs.
 func (ch *CloudHypervisor) SpawnSocketVMM(args types.ExecArgs, uid, gid uint32) (*CHSession, error) {
 	socketPath := ResolveSocketPath(args)
-	// Cloud Hypervisor binds this path itself; remove any stale leftover.
+	// Cloud Hypervisor binds this path, and a leftover file makes the bind fail.
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to remove stale socket %q: %w", socketPath, err)
 	}
@@ -343,31 +333,22 @@ func (s *CHSession) ConfigureVM(ctx context.Context, args types.ExecArgs, ukerne
 	return s.client.createVM(ctx, cfg)
 }
 
-// BootVM boots the configured VM.
 func (s *CHSession) BootVM(ctx context.Context) error {
 	vmmLog.Debug("api boot: sending vm.boot")
 	return s.client.bootVM(ctx)
 }
 
-// Kill terminates the child and reaps it. For error paths before Supervise.
+// Kill terminates the child process and reaps it.
 func (s *CHSession) Kill() {
 	_ = s.cmd.Process.Kill()
 	_, _ = s.cmd.Process.Wait()
 }
 
-// Supervise hands the calling process over to the child for the rest of its
-// life: it forwards SIGTERM/SIGINT and, once the child exits, exits this
-// process with the child's exit code, mirroring the semantics syscall.Exec
-// would have had. The caller must not exit before the child, since it is
-// the container's init process.
-//
-// On success this function does not return: it calls os.Exit with the
-// child's exit status once the child exits.
+// Supervise forwards signals to Cloud Hypervisor and exits with its exit code
+// once it exits. It does not return on success.
 func (s *CHSession) Supervise() error {
-	// Forward the signals containerd would send to stop the container.
-	// SIGKILL cannot be caught, so it is not listed here: if it arrives,
-	// this process dies immediately and the child is left running, a known
-	// gap for this bounded experiment, not yet handled.
+	// Forward the signals that stop a container. SIGKILL cannot be caught, so
+	// this process dies at once and leaves Cloud Hypervisor running.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
