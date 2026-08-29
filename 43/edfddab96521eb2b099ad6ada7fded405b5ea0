@@ -1,0 +1,27 @@
+pkg/unikontainers/hypervisors/qemu.go
+  s_ddebb8296f398a::t_6c2256c4a9fb99 179
+  s_ddebb8296f398a::t_158cc1fbd4129f 214
+  s_ddebb8296f398a::t_6720102d2c542d 76
+  s_ddebb8296f398a::t_e014e11de6b61e 163
+  s_ddebb8296f398a::t_04c66a1cf49b53 169-170
+  s_ddebb8296f398a::t_4258b5967adde8 223-224,226-227
+pkg/unikontainers/hypervisors/qemu_qmp_client.go
+  s_ddebb8296f398a::t_1bc10d4e4e9a53 25-26
+  s_ddebb8296f398a::t_6db306c9d5ae00 32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "43edfddab96521eb2b099ad6ada7fded405b5ea0",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}
