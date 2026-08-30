@@ -25,21 +25,15 @@ import (
 // the kill path indefinitely.
 const qmpDeadline = 5 * time.Second
 
-// SupportsGuestShutdown reports that QEMU can shut the guest down gracefully
-// via the QMP system_powerdown command.
 func (q *Qemu) SupportsGuestShutdown() bool {
 	return true
 }
 
-// RequestGuestShutdown connects to QEMU's QMP control socket and asks the
-// guest to power down. socketPath is the already-resolved, host-reachable
-// path; it is dialed directly. QMP requires a capabilities handshake before
-// any command, and system_powerdown's reply is interleaved with an async
-// POWERDOWN event, so each response is read until its own "return" arrives.
+// RequestGuestShutdown asks the guest to power down over QEMU's QMP socket.
+// socketPath is already resolved and host-reachable, so it is dialed directly.
 func (q *Qemu) RequestGuestShutdown(socketPath string) error {
-	// Bound the whole attempt (dial plus exchange) by a single absolute
-	// deadline, so the worst case stays within one qmpDeadline budget rather
-	// than dial timeout plus exchange timeout stacking on top of each other.
+	// One absolute deadline for dial and exchange together, so the two do not
+	// stack into twice the budget.
 	deadline := time.Now().Add(qmpDeadline)
 
 	conn, err := net.DialTimeout("unix", socketPath, time.Until(deadline))
@@ -66,14 +60,11 @@ func (q *Qemu) RequestGuestShutdown(socketPath string) error {
 		return err
 	}
 
-	// Ask the guest to power down (ACPI power button).
 	return qmpCommand(enc, dec, "system_powerdown", ErrShutdownCommand)
 }
 
-// qmpCommand sends a QMP command with no arguments and waits for its return.
-// stage names which step of the shutdown request this call serves
-// (qmp_capabilities is the handshake, system_powerdown is the command
-// itself), so a write or read failure can be wrapped with the right one.
+// qmpCommand sends an argument-less QMP command and waits for its return.
+// stage names the step, so a failure is wrapped with the right sentinel.
 func qmpCommand(enc *json.Encoder, dec *json.Decoder, command string, stage error) error {
 	if err := enc.Encode(map[string]string{"execute": command}); err != nil {
 		return fmt.Errorf("%w: failed to send QMP command %q: %w", stage, command, err)
@@ -81,11 +72,9 @@ func qmpCommand(enc *json.Encoder, dec *json.Decoder, command string, stage erro
 	return qmpReadReturn(dec, command, stage)
 }
 
-// qmpReadReturn reads QMP messages until it sees the command's own reply. Any
-// async "event" message is skipped; a "return" ends the wait successfully. A
-// read failure means the monitor never answered this stage, so it is wrapped
-// with stage; an "error" object means the monitor answered and rejected the
-// command, so that is wrapped with ErrShutdownRefused instead.
+// qmpReadReturn reads until the command's own "return", skipping async events.
+// A read failure means the monitor never answered, so it is wrapped with
+// stage; an "error" object means it answered and refused, so that is Refused.
 func qmpReadReturn(dec *json.Decoder, command string, stage error) error {
 	for {
 		var msg map[string]json.RawMessage
@@ -98,7 +87,5 @@ func qmpReadReturn(dec *json.Decoder, command string, stage error) error {
 		if _, ok := msg["return"]; ok {
 			return nil
 		}
-		// Any other message (typically an async "event") is skipped until the
-		// command's own "return" arrives.
 	}
 }

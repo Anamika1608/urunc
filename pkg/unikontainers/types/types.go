@@ -47,9 +47,8 @@ type VMM interface {
 	// guest-shutdown event over its control socket instead of being killed.
 	SupportsGuestShutdown() bool
 	// RequestGuestShutdown asks the monitor to inject its native guest-shutdown
-	// event over its control socket. socketPath is the already-resolved,
-	// host-reachable path (e.g. /proc/<pid>/root/...); the monitor dials it
-	// directly and must not re-resolve or re-prefix it.
+	// event. socketPath is already resolved and host-reachable, so the monitor
+	// dials it directly and must not re-resolve or re-prefix it.
 	RequestGuestShutdown(socketPath string) error
 }
 

@@ -29,17 +29,13 @@ import (
 // monitor cannot block the kill path indefinitely.
 const socketRequestTimeout = 5 * time.Second
 
-// unixSocketRequest performs an HTTP request to a monitor's REST API served
-// over a unix socket. The socket path is dialed directly; the URL host is a
-// placeholder net/http requires. A non-2xx response is returned as an error.
-// body may be nil for requests without a payload.
+// unixSocketRequest sends an HTTP request to a monitor's REST API over a unix
+// socket. The URL host is a placeholder that net/http requires.
 func unixSocketRequest(socketPath, method, urlPath string, body []byte) error {
 	client := &http.Client{
 		Timeout: socketRequestTimeout,
 		Transport: &http.Transport{
-			// A single one-shot request; keep no idle unix connection in the
-			// pool, so nothing lingers if this helper is ever called from a
-			// long-lived process.
+			// One-shot request, so leave no idle connection behind.
 			DisableKeepAlives: true,
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
