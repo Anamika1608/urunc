@@ -30,9 +30,8 @@ type VmmType string
 var ErrVMMNotInstalled = errors.New("vmm not found")
 var vmmLog = logrus.WithField("subsystem", "monitors")
 
-// Stages of a graceful-shutdown request, so a caller can report which step
-// failed. A monitor that never answers is a monitor that never got scheduled,
-// not a guest that refused, and these let a log line say so.
+// Stages of a graceful-shutdown request. A monitor that never answers did not
+// get to the request; it does not mean the guest refused.
 var (
 	ErrShutdownConnect   = errors.New("could not reach the monitor's control socket")
 	ErrShutdownGreeting  = errors.New("the monitor did not send its greeting")

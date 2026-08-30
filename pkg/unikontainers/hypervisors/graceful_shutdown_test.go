@@ -41,11 +41,9 @@ func tempSocketPath(t *testing.T, name string) string {
 	return filepath.Join(dir, name)
 }
 
-// qmpFakeServer is a minimal line-JSON QMP server over a unix socket. It sends
-// the greeting on accept, answers qmp_capabilities with {"return":{}}, and on
-// system_powerdown emits an async {"event":"POWERDOWN"} followed by the
-// command's own {"return":{}} (modelling the interleaving real QEMU does,
-// fact G29). It records the commands it receives, in order.
+// qmpFakeServer is a minimal line-JSON QMP server over a unix socket. It
+// sends the greeting on accept, answers qmp_capabilities with {"return":{}},
+// and interleaves an async POWERDOWN event before system_powerdown's return.
 type qmpFakeServer struct {
 	sockPath string
 	listener net.Listener
@@ -113,7 +111,7 @@ func (s *qmpFakeServer) serve() {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
 
-	// Real QEMU sends the greeting unprompted right after accept (fact G26).
+	// Real QEMU sends the greeting unprompted right after accept.
 	_ = enc.Encode(map[string]any{
 		"QMP": map[string]any{
 			"version":      map[string]any{},
@@ -142,7 +140,7 @@ func (s *qmpFakeServer) serve() {
 				"error": map[string]any{"class": "GenericError", "desc": "boom"},
 			})
 		case execute == "system_powerdown":
-			// Async event first, command return second (fact G29). A correct
+			// Async event first, command return second. A correct
 			// client must skip the event and keep reading until the return.
 			_ = enc.Encode(map[string]any{
 				"timestamp": map[string]any{"seconds": 0, "microseconds": 0},
@@ -260,14 +258,10 @@ func TestQemuRequestGuestShutdownStages(t *testing.T) {
 	})
 }
 
-// TestQemuClientDrainsPowerdownReturn proves the QMP client reads until it sees
-// the command's own "return", consuming it off the wire, instead of stopping at
-// the async POWERDOWN event. net.Pipe is fully synchronous: every server write
-// blocks until the client reads it. A single-read client (one that treated the
-// event as the reply and left the return unread) would leave the server's
-// return write pending and deadlock the follow-up command; a correct
-// read-until-return client drains it and lets the follow-up complete. The
-// deadlines turn that deadlock into a clean, prompt failure rather than a hang.
+// TestQemuGuestShutdownDrainsPowerdownReturn proves the client reads until the
+// command's own "return", not just the async POWERDOWN event. net.Pipe is
+// synchronous, so a client that stopped at the event would leave the server's
+// return write pending and deadlock the follow-up command.
 func TestQemuGuestShutdownDrainsPowerdownReturn(t *testing.T) {
 	t.Parallel()
 
@@ -296,7 +290,7 @@ func TestQemuGuestShutdownDrainsPowerdownReturn(t *testing.T) {
 	var cmd map[string]any
 	require.NoError(t, sdec.Decode(&cmd))
 	assert.Equal(t, "system_powerdown", cmd["execute"])
-	// Async event first, then the command's own return (fact G29).
+	// Async event first, then the command's own return.
 	require.NoError(t, senc.Encode(map[string]any{"event": "POWERDOWN"}))
 	require.NoError(t, senc.Encode(map[string]any{"return": map[string]any{}}))
 

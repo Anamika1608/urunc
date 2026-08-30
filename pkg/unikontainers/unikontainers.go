@@ -865,11 +865,8 @@ func (u *Unikontainer) Signal(signal unix.Signal) error {
 
 	socketPath := u.UruncCfg.Monitors[vmmType].SocketPath
 
-	// On SIGTERM, when graceful shutdown is enabled and the monitor exposes a
-	// control socket, ask the monitor to inject its native guest-shutdown event
-	// instead of killing it. The socket lives inside the monitor's rootfs, so
-	// it is reached through /proc/<pid>/root. Any failure falls back to
-	// forwarding the signal exactly as before.
+	// The socket lives inside the monitor's rootfs, so it is reached through
+	// /proc/<pid>/root.
 	requested := false
 	if signal == unix.SIGTERM &&
 		u.UruncCfg.Monitors[vmmType].GracefulShutdown &&
@@ -885,9 +882,6 @@ func (u *Unikontainer) Signal(signal unix.Signal) error {
 			requested = true
 		}
 	} else if signal == unix.SIGTERM && u.UruncCfg.Monitors[vmmType].GracefulShutdown {
-		// SIGTERM with graceful shutdown enabled, yet graceful is false: the
-		// only remaining reason is that this monitor does not support it. Log it
-		// so the fall-through is observable, without changing control flow.
 		uniklog.Debug("graceful shutdown enabled but not supported by this monitor, forwarding signal")
 	}
 

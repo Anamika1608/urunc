@@ -135,13 +135,10 @@ func (h *HVT) UsesKVM() bool {
 	return true
 }
 
-// SupportsGuestShutdown reports that HVT has no control socket to request a
-// graceful guest shutdown over.
 func (h *HVT) SupportsGuestShutdown() bool {
 	return false
 }
 
-// RequestGuestShutdown is unsupported for HVT; it has no control socket.
 func (h *HVT) RequestGuestShutdown(_ string) error {
 	return fmt.Errorf("guest shutdown not supported for hvt")
 }

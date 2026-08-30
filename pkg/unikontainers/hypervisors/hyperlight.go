@@ -51,13 +51,10 @@ func (h *Hyperlight) SupportsControlSocket() bool {
 	return false
 }
 
-// SupportsGuestShutdown reports that Hyperlight has no control socket to
-// request a graceful guest shutdown over.
 func (h *Hyperlight) SupportsGuestShutdown() bool {
 	return false
 }
 
-// RequestGuestShutdown is unsupported for Hyperlight; it has no control socket.
 func (h *Hyperlight) RequestGuestShutdown(_ string) error {
 	return fmt.Errorf("guest shutdown not supported for hyperlight")
 }

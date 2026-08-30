@@ -97,9 +97,6 @@ func (fc *Firecracker) SupportsGuestShutdown() bool {
 	return runtime.GOARCH == "amd64"
 }
 
-// RequestGuestShutdown asks Firecracker to inject a Ctrl+Alt+Del into the
-// guest over its REST API control socket. socketPath is the already-resolved,
-// host-reachable path; it is dialed directly. A non-2xx response is an error.
 func (fc *Firecracker) RequestGuestShutdown(socketPath string) error {
 	body := []byte(`{"action_type":"SendCtrlAltDel"}`)
 	return unixSocketRequest(socketPath, http.MethodPut, "/actions", body)
