@@ -17,7 +17,6 @@ package unikernels
 import (
 	"fmt"
 	"net"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -285,11 +284,9 @@ func (l *Linux) setupUrunitConfig(rfs types.RootfsParams) error {
 
 	var err error
 	if l.RootFsType == "initrd" {
-		initrdToUpdate := filepath.Join(rfs.MonRootfs, rfs.Path)
-		err = initrd.AddFileToInitrd(initrdToUpdate, urunitConfig, urunitConfPath)
+		err = initrd.AddFileToInitrd(rfs.Path, urunitConfig, urunitConfPath)
 	} else {
-		urunitConfigFile := filepath.Join(rfs.MonRootfs, urunitConfPath)
-		err = createFile(urunitConfigFile, urunitConfig)
+		err = createFile(urunitConfPath, urunitConfig)
 	}
 
 	if err != nil {

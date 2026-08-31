@@ -668,13 +668,6 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		vmmArgs.VSockDevID = idToGuestCID(u.State.ID)
 	}
 
-	// unikernel
-	// build the unikernel command
-	vmmArgs.Command, err = buildUnikernelCommand(unikernel, unikernelParams)
-	if err != nil {
-		return err
-	}
-
 	// pivot
 	_, err = findNS(u.Spec.Linux.Namespaces, specs.MountNamespace)
 	// Only pivot if a mount namespace entry is actually present in the
@@ -684,6 +677,15 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	// pivot_root would run against the caller's own root filesystem.
 	withPivot := err == nil || errors.Is(err, ErrNotExistingNS)
 	err = changeRoot(rootfsParams.MonRootfs, withPivot)
+	if err != nil {
+		return err
+	}
+
+	// unikernel
+	// Initialize the unikernel after the pivot so that any file setup it performs
+	// (e.g. writing the urunit config into the initrd) operates within the monitor
+	// rootfs.
+	vmmArgs.Command, err = buildUnikernelCommand(unikernel, unikernelParams)
 	if err != nil {
 		return err
 	}
