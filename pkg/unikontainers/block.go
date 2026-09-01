@@ -36,15 +36,16 @@ const tmpfsSizeForBlockRootfs = "65536k"
 var ErrMountpoint = errors.New("no FS is mounted in this mountpoint")
 
 type blockRootfs struct {
-	mounts        []specs.Mount
-	monRootfs     string
-	mountedPath   string
-	path          string
-	kernelPath    string
-	initrdPath    string
-	uruncJSONPath string
-	guestType     string
-	guest         types.Unikernel
+	mounts          []specs.Mount
+	monRootfs       string
+	mountedPath     string
+	containerRootfs string
+	path            string
+	kernelPath      string
+	initrdPath      string
+	uruncJSONPath   string
+	guestType       string
+	guest           types.Unikernel
 }
 
 // getMountInfo determines whether the provided path is a mount point
@@ -372,9 +373,11 @@ func (b blockRootfs) preSetup() error {
 		return fmt.Errorf("failed to copy files from mount list: %w", err)
 	}
 
+	// Extract the boot files under containerRootfsMountPath
 	// FIXME: This approach fills up /run with unikernel binaries and
 	// urunc.json files for each unikernel instance we run
-	err = extractBootFiles(b.mountedPath, b.monRootfs, b.kernelPath, b.uruncJSONPath, b.initrdPath)
+	extractDest := filepath.Join(b.monRootfs, containerRootfsMountPath)
+	err = extractBootFiles(b.mountedPath, extractDest, b.kernelPath, b.uruncJSONPath, b.initrdPath)
 	if err != nil {
 		return fmt.Errorf("failed to extract boot files from rootfs: %w", err)
 	}
@@ -392,7 +395,16 @@ func (b blockRootfs) postSetup() error {
 }
 
 func (b blockRootfs) getMounts() ([]specs.Mount, error) {
-	return []specs.Mount{tmpfsMount("/tmp", tmpfsSizeForBlockRootfs)}, nil
+	mounts := []specs.Mount{tmpfsMount("/tmp", tmpfsSizeForBlockRootfs)}
+
+	if b.mountedPath == "" {
+		// In the case of explicit block image the kernel and the block
+		// image are in the container's rootfs, so bind-mount container's
+		// rootfs into the monitor rootfs
+		mounts = append(mounts, bindMount(b.containerRootfs, containerRootfsMountPath, true))
+	}
+
+	return mounts, nil
 }
 
 func (b blockRootfs) getBlockDevs() ([]types.BlockDevParams, error) {

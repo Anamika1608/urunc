@@ -34,7 +34,7 @@ func TestNewRootfsBuilderPassesGuestTypeToInitrd(t *testing.T) {
 		Spec:  &specs.Spec{},
 	}
 
-	builder := u.newRootfsBuilder(types.RootfsParams{Type: "initrd"}, nil, "", "", 0)
+	builder := u.newRootfsBuilder("", types.RootfsParams{Type: "initrd"}, nil, "", "", 0)
 	rfs, ok := builder.(initrdRootfs)
 	require.True(t, ok)
 	require.Equal(t, unikernels.UnikraftUnikernel, rfs.guestType)

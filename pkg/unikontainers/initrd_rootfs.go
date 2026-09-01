@@ -28,7 +28,7 @@ const tmpfsSizeForInitrdRootfs = "65536k"
 
 type initrdRootfs struct {
 	mounts             []specs.Mount
-	monRootfs          string
+	mountedPath        string
 	initrdHostFullPath string
 	guestType          string
 }
@@ -52,7 +52,10 @@ func (i initrdRootfs) postSetup() error {
 }
 
 func (i initrdRootfs) getMounts() ([]specs.Mount, error) {
-	return []specs.Mount{tmpfsMount("/tmp", tmpfsSizeForInitrdRootfs)}, nil
+	return []specs.Mount{
+		bindMount(i.mountedPath, containerRootfsMountPath, true),
+		tmpfsMount("/tmp", tmpfsSizeForInitrdRootfs),
+	}, nil
 }
 
 func (i initrdRootfs) getBlockDevs() ([]types.BlockDevParams, error) {

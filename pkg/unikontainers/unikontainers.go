@@ -29,6 +29,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/urunc-dev/urunc/internal/constants"
 	"github.com/urunc-dev/urunc/pkg/network"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/hypervisors"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
@@ -42,8 +43,8 @@ import (
 )
 
 const (
-	monitorRootfsDirName     string = "monRootfs"
-	containerRootfsMountPath string = "/cntrRootfs"
+	monitorRootfsDirName     = constants.MonitorRootfsDirName
+	containerRootfsMountPath = constants.ContainerRootfsMountPath
 	// libcontainerDirName is the directory under urunc's root used from libcontainer
 	libcontainerDirName string = "libcontainer"
 )
@@ -193,6 +194,11 @@ func (u *Unikontainer) InitialSetup() error {
 		"mountedPath": rootfsParams.MountedPath,
 	}).Debug("guest rootfs params")
 
+	err = os.MkdirAll(rootfsParams.MonRootfs, 0o755)
+	if err != nil {
+		return fmt.Errorf("failed to create monitor rootfs directory %s: %w", rootfsParams.MonRootfs, err)
+	}
+
 	vmmType := u.State.Annotations[annotHypervisor]
 	vmm, err := hypervisors.NewVMM(hypervisors.VmmType(vmmType), u.UruncCfg.Monitors)
 	if err != nil {
@@ -201,7 +207,7 @@ func (u *Unikontainer) InitialSetup() error {
 
 	defaultMemSizeMB := u.UruncCfg.Monitors[vmmType].DefaultMemoryMB
 	memory := monitorMemoryBytes(defaultMemSizeMB, u.Spec.Linux.Resources)
-	rfsBuilder := u.newRootfsBuilder(rootfsParams, unikernel, unikernelPath, initrdPath, memory)
+	rfsBuilder := u.newRootfsBuilder(rootfsDir, rootfsParams, unikernel, unikernelPath, initrdPath, memory)
 
 	err = rfsBuilder.preSetup()
 	if err != nil {
@@ -347,19 +353,19 @@ func ChooseRootfs(bundle, specRoot string, annot map[string]string, cfg *UruncCo
 	// Priority 1: Initrd
 	result, ok := selector.tryInitrd()
 	if ok {
-		return result, nil
+		return switchMonRootfs(result, bundleDir), nil
 	}
 
 	// Priority 2: Explicit block annotation
 	result, ok = selector.tryExplicitBlock()
 	if ok {
-		return result, nil
+		return switchMonRootfs(result, bundleDir), nil
 	}
 
 	// Priority 3 & 4: Container rootfs (block or shared-fs)
 	result, ok = selector.tryContainerRootfs()
 	if ok {
-		return switchMonRootfs(result, bundleDir)
+		return switchMonRootfs(result, bundleDir), nil
 	}
 
 	if selector.shouldMountContainerRootfs() {
@@ -367,9 +373,9 @@ func ChooseRootfs(bundle, specRoot string, annot map[string]string, cfg *UruncCo
 	}
 
 	uniklog.Info("no rootfs configured for guest")
-	result.MonRootfs = rootfsDir
 
-	return result, nil
+	result = newRootfsResult("", "", selector.cntrRootfs)
+	return switchMonRootfs(result, bundleDir), nil
 }
 
 // getMonitorResources collects every mount and device required for the monitor's
@@ -413,33 +419,37 @@ func getMonitorResources(rfs rootfsBuilder, rootfsParams types.RootfsParams, vmm
 }
 
 // newRootfsBuilder constructs the rootfsBuilder matching the selected guest
-// rootfs. It is shared by InitialSetup (which gathers the monitor resources) and
-// Exec (which performs the per-rootfs actions).
-func (u *Unikontainer) newRootfsBuilder(rootfsParams types.RootfsParams, unikernel types.Unikernel, unikernelPath string, initrdPath string, memory uint64) rootfsBuilder {
+// rootfs. It is shared by InitialSetup (which gathers the monitor resources)
+// and Exec (which performs the per-rootfs actions).  containerRootfs is the
+// container's image rootfs and used only in the explicit block-image case,
+// because MountedPath is empty and this is the only way to reach the container
+// rootfs that holds the image and the boot files.
+// TODO: Find a better way for the explicit block image case to reduce arguments.
+func (u *Unikontainer) newRootfsBuilder(containerRootfs string, rootfsParams types.RootfsParams, unikernel types.Unikernel, unikernelPath string, initrdPath string, memory uint64) rootfsBuilder {
 	switch rootfsParams.Type {
 	case "block":
 		return blockRootfs{
-			mounts:        u.Spec.Mounts,
-			monRootfs:     rootfsParams.MonRootfs,
-			mountedPath:   rootfsParams.MountedPath,
-			path:          rootfsParams.Path,
-			kernelPath:    unikernelPath,
-			initrdPath:    initrdPath,
-			uruncJSONPath: uruncJSONFilename,
-			guestType:     u.State.Annotations[annotType],
-			guest:         unikernel,
+			mounts:          u.Spec.Mounts,
+			monRootfs:       rootfsParams.MonRootfs,
+			mountedPath:     rootfsParams.MountedPath,
+			containerRootfs: containerRootfs,
+			path:            rootfsParams.Path,
+			kernelPath:      unikernelPath,
+			initrdPath:      initrdPath,
+			uruncJSONPath:   uruncJSONFilename,
+			guestType:       u.State.Annotations[annotType],
+			guest:           unikernel,
 		}
 	case "initrd":
 		return initrdRootfs{
 			mounts:             u.Spec.Mounts,
-			initrdHostFullPath: filepath.Join(rootfsParams.MonRootfs, rootfsParams.Path),
-			monRootfs:          rootfsParams.MonRootfs,
+			mountedPath:        rootfsParams.MountedPath,
+			initrdHostFullPath: filepath.Join(rootfsParams.MountedPath, rootfsParams.Path),
 			guestType:          u.State.Annotations[annotType],
 		}
 	case "virtiofs", "9pfs":
 		return sharedfsRootfs{
 			mounts:      u.Spec.Mounts,
-			monRootfs:   rootfsParams.MonRootfs,
 			mountedPath: rootfsParams.MountedPath,
 			sfsType:     rootfsParams.Type,
 			vfsdConfig:  u.UruncCfg.ExtraBins["virtiofsd"],
@@ -448,7 +458,7 @@ func (u *Unikontainer) newRootfsBuilder(rootfsParams types.RootfsParams, unikern
 		}
 	default:
 		return noRootfs{
-			monRootfs:            rootfsParams.MonRootfs,
+			containerRootfsPath:  rootfsParams.MountedPath,
 			annotBlockPath:       u.State.Annotations[annotBlock],
 			annotBlockMountPoint: u.State.Annotations[annotBlockMntPoint],
 		}
@@ -526,11 +536,22 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		Block:      monRes.BlockArgs,
 	}
 
-	if rootfsParams.Type == "virtiofs" || rootfsParams.Type == "9pfs" {
-		// Update the paths of the files we need to pass in the monitor process.
-		vmmArgs.UnikernelPath = adjustPathsForSharedfs(vmmArgs.UnikernelPath)
-		vmmArgs.InitrdPath = adjustPathsForSharedfs(vmmArgs.InitrdPath)
+	// For an explicit block image the rootfs block lives inside the container's
+	// rootfs, which is bind-mounted at containerRootfsMountPath. Adjust its path
+	// like the other boot files so the monitor reaches it through the bind mount.
+	if rootfsParams.Type == "block" && rootfsParams.MountedPath == "" {
+		for i := range guest.Block {
+			if guest.Block[i].ID == "rootfs" {
+				guest.Block[i].Source = confineToContainerRootfs(guest.Block[i].Source)
+			}
+		}
 	}
+
+	// Update the paths of the files we need to pass in the monitor process. Every
+	// rootfs type keeps its boot files under containerRootfsMountPath in the
+	// monitor rootfs
+	vmmArgs.UnikernelPath = confineToContainerRootfs(vmmArgs.UnikernelPath)
+	vmmArgs.InitrdPath = confineToContainerRootfs(vmmArgs.InitrdPath)
 	vmmArgs.Sharedfs = monRes.Sharedfs
 
 	mSpec.ContainerID = u.State.ID
@@ -731,6 +752,17 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	return execMonitor(metrics, vmm, vmmArgs, execCmd)
 }
 
+// confineToContainerRootfs ensures an image-controlled path stays under the
+// container rootfs mount at containerRootfsMountPath. An empty path is
+// returned unchanged.
+func confineToContainerRootfs(path string) string {
+	if path != "" {
+		return filepath.Join(containerRootfsMountPath, path)
+	}
+
+	return path
+}
+
 // buildUnikernelCommand initializes the unikernel with the collected parameters
 // and returns its command line.
 func buildUnikernelCommand(unikernel types.Unikernel, params types.UnikernelParams) (string, error) {
@@ -838,11 +870,8 @@ func (u *Unikontainer) Kill() error {
 	return nil
 }
 
-// Delete removes the containers base directory and its contents
+// Delete removes the monitor rootfs and the container's base directory.
 func (u *Unikontainer) Delete() error {
-	var dirs []string
-	var prefPath string
-
 	if u.isRunning() {
 		return fmt.Errorf("cannot delete running container: %s", u.State.ID)
 	}
@@ -870,61 +899,12 @@ func (u *Unikontainer) Delete() error {
 		uniklog.Errorf("failed to restore block volume mounts: %v", err)
 	}
 
-	// get a monitor instance of the running monitor
-	vmmType := u.State.Annotations[annotHypervisor]
-	vmm, err := hypervisors.NewVMM(hypervisors.VmmType(vmmType), u.UruncCfg.Monitors)
+	// The monitor rootfs lives under the bundle. Its mounts went away with the
+	// monitor's mount namespace, so only the directory tree itself is left.
+	monRootfs := filepath.Join(filepath.Clean(u.State.Bundle), monitorRootfsDirName)
+	err = os.RemoveAll(monRootfs)
 	if err != nil {
-		return err
-	}
-
-	// Make sure paths are clean
-	bundleDir := filepath.Clean(u.State.Bundle)
-	rootfsDir := filepath.Clean(u.Spec.Root.Path)
-	if !filepath.IsAbs(rootfsDir) {
-		rootfsDir = filepath.Join(bundleDir, rootfsDir)
-	}
-	monRootfs := filepath.Join(bundleDir, monitorRootfsDirName)
-
-	// TODO: We might not need to remove any of the directories and let
-	// the kernel cleanup the mounts and shim to remove directories.
-	// However, just to be on the safe side, we remove all the newly
-	// created directories from urunc. In order to check if we used the
-	// rootfs under the bundle directory or we create anew one, we can check
-	// if the monitorRootfsDirName directory exists under the bundle.
-	_, err = os.Stat(monRootfs)
-	if !os.IsNotExist(err) {
-		// Since there was no block defined for the unikernel
-		// and we created a new rootfs for the monitor, we need to
-		// clean it up.
-		dirs = append(dirs, monitorRootfsDirName)
-		prefPath = bundleDir
-	} else {
-		// Otherwise remove the enw directories we created and the monitor spec
-		// file inside the container's rootfs.
-		// We do not need to unmount anything here, since we rely on Linux
-		// to do the cleanup for us. This will happen automatically,
-		// when the mount namespace gets destroyed
-		err = RemoveMonitorSpec(rootfsDir)
-		// Ignore the case where the file does not exist.
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("failed to remove the monitor spec: %w", err)
-		}
-
-		dirs = []string{
-			"/lib",
-			"/lib64",
-			"/usr",
-			"/proc",
-			"/dev",
-			"/tmp",
-		}
-		dirs = append(dirs, vmm.Path())
-		prefPath = rootfsDir
-	}
-
-	err = rmMultipleDirs(prefPath, dirs)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to remove the monitor rootfs %s: %w", monRootfs, err)
 	}
 
 	return os.RemoveAll(u.BaseDir)

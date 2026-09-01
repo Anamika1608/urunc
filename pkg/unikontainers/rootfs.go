@@ -132,7 +132,7 @@ type rootfsSelector struct {
 }
 
 type noRootfs struct {
-	monRootfs            string
+	containerRootfsPath  string
 	annotBlockPath       string
 	annotBlockMountPoint string
 }
@@ -146,7 +146,10 @@ func (n noRootfs) postSetup() error {
 }
 
 func (n noRootfs) getMounts() ([]specs.Mount, error) {
-	return []specs.Mount{tmpfsMount("/tmp", tmpfsSizeForNoRootfs)}, nil
+	return []specs.Mount{
+		bindMount(n.containerRootfsPath, containerRootfsMountPath, true),
+		tmpfsMount("/tmp", tmpfsSizeForNoRootfs),
+	}, nil
 }
 
 func (n noRootfs) getBlockDevs() ([]types.BlockDevParams, error) {
@@ -176,13 +179,12 @@ func (n noRootfs) preStartCmd() []string {
 	return nil
 }
 
-// newRootfsResult creates a RootfsParams with common defaults
-func newRootfsResult(rootfsType string, path string, mountedPath string, monRootfs string) types.RootfsParams {
+// newRootfsResult creates a RootfsParams with common defaults.
+func newRootfsResult(rootfsType string, path string, mountedPath string) types.RootfsParams {
 	return types.RootfsParams{
 		Type:        rootfsType,
 		Path:        path,
 		MountedPath: mountedPath,
-		MonRootfs:   monRootfs,
 	}
 }
 
@@ -193,7 +195,7 @@ func (rs *rootfsSelector) tryInitrd() (types.RootfsParams, bool) {
 		return types.RootfsParams{}, false
 	}
 
-	return newRootfsResult("initrd", initrdPath, "", rs.cntrRootfs), true
+	return newRootfsResult("initrd", initrdPath, rs.cntrRootfs), true
 }
 
 // tryExplicitBlock checks for explicit block device annotation with
@@ -207,7 +209,7 @@ func (rs *rootfsSelector) tryExplicitBlock() (types.RootfsParams, bool) {
 		return types.RootfsParams{}, false
 	}
 
-	return newRootfsResult("block", blockPath, "", rs.cntrRootfs), true
+	return newRootfsResult("block", blockPath, ""), true
 }
 
 // shouldMountContainerRootfs checks if container rootfs should be mounted
@@ -244,7 +246,7 @@ func (rs *rootfsSelector) tryContainerBlockRootfs() (types.RootfsParams, bool) {
 		return types.RootfsParams{}, false
 	}
 
-	return newRootfsResult("block", rootFsDevice.Source, rs.cntrRootfs, rs.cntrRootfs), true
+	return newRootfsResult("block", rootFsDevice.Source, rs.cntrRootfs), true
 }
 
 // tryVirtiofs checks if virtiofs can be used
@@ -261,7 +263,7 @@ func (rs *rootfsSelector) tryVirtiofs() (types.RootfsParams, bool) {
 		return types.RootfsParams{}, false
 	}
 
-	return newRootfsResult("virtiofs", rs.cntrRootfs, rs.cntrRootfs, rs.cntrRootfs), true
+	return newRootfsResult("virtiofs", rs.cntrRootfs, rs.cntrRootfs), true
 }
 
 // try9pfs checks if 9pfs can be used
@@ -274,7 +276,7 @@ func (rs *rootfsSelector) try9pfs() (types.RootfsParams, bool) {
 		return types.RootfsParams{}, false
 	}
 
-	return newRootfsResult("9pfs", rs.cntrRootfs, rs.cntrRootfs, rs.cntrRootfs), true
+	return newRootfsResult("9pfs", rs.cntrRootfs, rs.cntrRootfs), true
 }
 
 // tryContainerSharedFS tries shared filesystem options (virtiofs, then 9pfs)
@@ -317,15 +319,12 @@ func (rs *rootfsSelector) tryContainerRootfs() (types.RootfsParams, bool) {
 	return types.RootfsParams{}, false
 }
 
-func switchMonRootfs(res types.RootfsParams, bundle string) (types.RootfsParams, error) {
-	monRootfs := filepath.Join(bundle, monitorRootfsDirName)
-	err := os.MkdirAll(monRootfs, 0o755)
-	if err != nil {
-		return types.RootfsParams{}, fmt.Errorf("failed to create monitor rootfs directory %s: %w", monRootfs, err)
-	}
-	res.MonRootfs = monRootfs
+// switchMonRootfs points RootfsParams at the dedicated monitor rootfs, separate
+// from the container's image rootfs.
+func switchMonRootfs(res types.RootfsParams, bundle string) types.RootfsParams {
+	res.MonRootfs = filepath.Join(filepath.Clean(bundle), monitorRootfsDirName)
 
-	return res, nil
+	return res
 }
 
 // pivotRootfs changes rootfs with pivot

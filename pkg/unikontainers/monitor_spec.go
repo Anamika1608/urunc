@@ -95,12 +95,3 @@ func LoadMonitorSpec(dir string) (monitorSpec, error) {
 
 	return ms, nil
 }
-
-// RemoveMonitorSpec deletes the monitor spec file from dir.
-func RemoveMonitorSpec(dir string) error {
-	path, err := securejoin.SecureJoin(dir, monitorSpecFilename)
-	if err != nil {
-		return fmt.Errorf("could not resolve path for monitor spec: %w", err)
-	}
-	return os.Remove(path)
-}

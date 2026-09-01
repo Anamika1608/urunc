@@ -17,10 +17,12 @@ package unikernels
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/urunc-dev/urunc/internal/constants"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/initrd"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
 )
@@ -284,7 +286,8 @@ func (l *Linux) setupUrunitConfig(rfs types.RootfsParams) error {
 
 	var err error
 	if l.RootFsType == "initrd" {
-		err = initrd.AddFileToInitrd(rfs.Path, urunitConfig, urunitConfPath)
+		initrdToUpdate := filepath.Join(constants.ContainerRootfsMountPath, rfs.Path)
+		err = initrd.AddFileToInitrd(initrdToUpdate, urunitConfig, urunitConfPath)
 	} else {
 		err = createFile(urunitConfPath, urunitConfig)
 	}

@@ -29,15 +29,15 @@ func TestNewRootfsResult(t *testing.T) {
 		Type:        "initrd",
 		Path:        "/path/to/initrd",
 		MountedPath: "/mnt/rootfs",
-		MonRootfs:   "/run/urunc/mon",
 	}
 
-	got := newRootfsResult("initrd", "/path/to/initrd", "/mnt/rootfs", "/run/urunc/mon")
+	got := newRootfsResult("initrd", "/path/to/initrd", "/mnt/rootfs")
 
 	assert.Equal(t, expected.Type, got.Type, "Type should match")
 	assert.Equal(t, expected.Path, got.Path, "Path should match")
 	assert.Equal(t, expected.MountedPath, got.MountedPath, "MountedPath should match")
-	assert.Equal(t, expected.MonRootfs, got.MonRootfs, "MonRootfs should match")
+	// MonRootfs is intentionally not set by newRootfsResult; switchMonRootfs owns it.
+	assert.Empty(t, got.MonRootfs, "MonRootfs should be left unset")
 }
 
 func TestRootfsSelector_TryInitrd(t *testing.T) {

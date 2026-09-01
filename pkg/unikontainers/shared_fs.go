@@ -30,7 +30,6 @@ type sharedfsRootfs struct {
 	mounts      []specs.Mount
 	vfsdConfig  types.ExtraBinConfig
 	sharedPath  string
-	monRootfs   string
 	mountedPath string
 	sfsType     string
 	memory      uint64
@@ -108,15 +107,6 @@ func chooseTmpfsSize(sfsType string, mem uint64) string {
 	tmpMountMemStr := hypervisors.BytesToStringMB(tmpMountMem) + "m"
 
 	return tmpMountMemStr
-}
-
-// adjustPathsForSharedFS updates paths to be relative to container rootfs mount
-func adjustPathsForSharedfs(path string) string {
-	if path != "" {
-		return filepath.Join(containerRootfsMountPath, path)
-	}
-
-	return path
 }
 
 // filterBindMounts filters the mounts form the container's spec keeping only the

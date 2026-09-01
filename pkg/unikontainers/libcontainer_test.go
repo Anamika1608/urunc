@@ -40,7 +40,8 @@ func newTestUnikontainer(t *testing.T, spec *specs.Spec, monRes monitorResources
 	baseDir := t.TempDir()
 	monRootfs := t.TempDir()
 
-	rootfsParams := newRootfsResult("initrd", "initrd.cpio", "", monRootfs)
+	rootfsParams := newRootfsResult("initrd", "initrd.cpio", "")
+	rootfsParams.MonRootfs = monRootfs
 	monRes.Rootfs = rootfsParams
 
 	err := saveMonitorResources(baseDir, monRes)
