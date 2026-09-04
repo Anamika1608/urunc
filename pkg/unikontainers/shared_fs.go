@@ -47,11 +47,11 @@ func (s sharedfsRootfs) postSetup() error {
 func (s sharedfsRootfs) getMounts() ([]specs.Mount, error) {
 	// Mount the container's rootfs inside the monitor rootfs and then the
 	// container's volumes on top of it.
-	mounts := []specs.Mount{bindMount(s.mountedPath, containerRootfsMountPath, true)}
+	mounts := []specs.Mount{bindMount(s.mountedPath, containerRootfsMountPath, true, false, "nodev", "nosuid", "noexec")}
 
 	if s.sfsType == "virtiofs" {
 		// Get the virtiofsd binary from host in monRootfs
-		mounts = append(mounts, bindMount(s.vfsdConfig.Path, s.vfsdConfig.Path, true))
+		mounts = append(mounts, bindMount(s.vfsdConfig.Path, s.vfsdConfig.Path, true, true))
 	}
 
 	tmpfsSize := chooseTmpfsSize(s.sfsType, s.memory)

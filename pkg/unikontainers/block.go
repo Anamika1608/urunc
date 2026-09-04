@@ -423,7 +423,7 @@ func (b blockRootfs) getMounts() ([]specs.Mount, error) {
 		// In the case of explicit block image the kernel and the block
 		// image are in the container's rootfs, so bind-mount container's
 		// rootfs into the monitor rootfs
-		mounts = append(mounts, bindMount(b.containerRootfs, containerRootfsMountPath, true))
+		mounts = append(mounts, bindMount(b.containerRootfs, containerRootfsMountPath, true, false, "nodev", "nosuid", "noexec"))
 	}
 
 	return mounts, nil

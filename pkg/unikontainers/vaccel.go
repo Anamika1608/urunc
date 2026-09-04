@@ -138,7 +138,7 @@ func prepareVSockEnvironment(monRootfs string, hypervisor string, vsockSocketPat
 
 	// bind mount the unix socket directory
 	if hypervisor == "firecracker" {
-		err = applyMount(monRootfs, bindMount(vsockSocketPath, vsockSocketPath, true))
+		err = applyMount(monRootfs, bindMount(vsockSocketPath, vsockSocketPath, true, false))
 		if err != nil {
 			return nil, err
 		}

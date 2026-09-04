@@ -58,7 +58,7 @@ func (i initrdRootfs) postSetup() error {
 
 func (i initrdRootfs) getMounts() ([]specs.Mount, error) {
 	return []specs.Mount{
-		bindMount(i.mountedPath, containerRootfsMountPath, true),
+		bindMount(i.mountedPath, containerRootfsMountPath, true, false, "nodev", "nosuid", "noexec"),
 		tmpfsMount("/tmp", tmpfsSizeForInitrdRootfs),
 	}, nil
 }

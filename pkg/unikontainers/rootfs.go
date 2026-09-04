@@ -57,8 +57,9 @@ func tmpfsMount(target string, size string) specs.Mount {
 }
 
 // bindMount builds a non-recursive, and private if argument is set, bind mount
-// of source at target
-func bindMount(source string, target string, private bool) specs.Mount {
+// of source at target. Any extraOptions (e.g. nodev, nosuid, noexec) are
+// appended to the mount options as-is.
+func bindMount(source string, target string, private bool, ro bool, extraOptions ...string) specs.Mount {
 	m := specs.Mount{
 		Type:        "bind",
 		Source:      source,
@@ -69,6 +70,12 @@ func bindMount(source string, target string, private bool) specs.Mount {
 	if private {
 		m.Options = append(m.Options, "private")
 	}
+
+	if ro {
+		m.Options = append(m.Options, "ro")
+	}
+
+	m.Options = append(m.Options, extraOptions...)
 
 	return m
 }
@@ -146,8 +153,12 @@ func (n noRootfs) postSetup() error {
 }
 
 func (n noRootfs) getMounts() ([]specs.Mount, error) {
+	// The monitor needs write access to the container rootfs only when it
+	// attaches a block image that lives inside it to the guest.
+	readOnly := n.annotBlockPath == "" || n.annotBlockMountPoint == ""
+
 	return []specs.Mount{
-		bindMount(n.containerRootfsPath, containerRootfsMountPath, true),
+		bindMount(n.containerRootfsPath, containerRootfsMountPath, true, readOnly, "nodev", "nosuid", "noexec"),
 		tmpfsMount("/tmp", tmpfsSizeForNoRootfs),
 	}, nil
 }
@@ -493,21 +504,21 @@ func mountsForMonitor(monitorPath string, monitorDataPath string) ([]specs.Mount
 		Options:     []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620"},
 	}
 
-	mounts := []specs.Mount{procMount, devMount, devPtsMount, bindMount(monitorPath, monitorPath, true)}
+	mounts := []specs.Mount{procMount, devMount, devPtsMount, bindMount(monitorPath, monitorPath, true, true)}
 
 	monitorName := filepath.Base(monitorPath)
 	// TODO: Remove most of these when we switch to static binaries.
 	if monitorName != "firecracker" {
-		mounts = append(mounts, bindMount("/lib", "/lib", true))
+		mounts = append(mounts, bindMount("/lib", "/lib", true, true))
 
 		// If /lib64 does not exist, just ignore it
 		if _, err := os.Stat("/lib64"); err == nil {
-			mounts = append(mounts, bindMount("/lib64", "/lib64", true))
+			mounts = append(mounts, bindMount("/lib64", "/lib64", true, true))
 		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
 
-		mounts = append(mounts, bindMount("/usr/lib", "/usr/lib", true))
+		mounts = append(mounts, bindMount("/usr/lib", "/usr/lib", true, true))
 	}
 
 	if len(monitorName) >= 4 && monitorName[:4] == "qemu" {
@@ -525,12 +536,12 @@ func mountsForMonitor(monitorPath string, monitorDataPath string) ([]specs.Mount
 			}
 		}
 
-		mounts = append(mounts, bindMount(qDataPath, "/usr/share/qemu", true))
+		mounts = append(mounts, bindMount(qDataPath, "/usr/share/qemu", true, true))
 
 		// In urunc-deploy and in some distros seabios does not exist and
 		// we do not need it. So if we could not find it, just ignore it.
 		if _, err := os.Stat(sBiosPath); err == nil {
-			mounts = append(mounts, bindMount(sBiosPath, "/usr/share/seabios", true))
+			mounts = append(mounts, bindMount(sBiosPath, "/usr/share/seabios", true, true))
 		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
