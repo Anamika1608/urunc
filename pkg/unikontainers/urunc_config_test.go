@@ -26,6 +26,7 @@ import (
 // Constants for test configuration keys and values
 const (
 	testLibcontainerKey  = "urunc_config.runtime.libcontainer"
+	testVAccelKey        = "urunc_config.runtime.vAccel"
 	testQemuMemoryKey    = "urunc_config.monitors.qemu.default_memory_mb"
 	testQemuVCPUsKey     = "urunc_config.monitors.qemu.default_vcpus"
 	testQemuBinaryKey    = "urunc_config.monitors.qemu.binary_path"
@@ -435,7 +436,7 @@ func TestUruncConfigMap(t *testing.T) {
 		cfgMap := config.Map()
 
 		assert.NotNil(t, cfgMap)
-		assert.Equal(t, map[string]string{testLibcontainerKey: "false"}, cfgMap)
+		assert.Equal(t, map[string]string{testLibcontainerKey: "false", testVAccelKey: "false"}, cfgMap)
 	})
 
 	t.Run("empty extra binaries map produces no extra binary keys", func(t *testing.T) {
@@ -447,7 +448,7 @@ func TestUruncConfigMap(t *testing.T) {
 		cfgMap := config.Map()
 
 		assert.NotNil(t, cfgMap)
-		assert.Equal(t, map[string]string{testLibcontainerKey: "false"}, cfgMap)
+		assert.Equal(t, map[string]string{testLibcontainerKey: "false", testVAccelKey: "false"}, cfgMap)
 	})
 
 	t.Run("vhost true is serialized correctly", func(t *testing.T) {
@@ -527,6 +528,7 @@ func TestDefaultConfigs(t *testing.T) {
 		assert.False(t, config.Timestamps.Enabled)
 		assert.Equal(t, testTimestampsPath, config.Timestamps.Destination)
 		assert.False(t, config.Runtime.Libcontainer)
+		assert.False(t, config.Runtime.VAccel)
 		assert.Len(t, config.Monitors, 5)
 		assert.Len(t, config.ExtraBins, 1)
 	})
@@ -618,6 +620,28 @@ path = "/usr/bin/mon"
 		config, err := LoadUruncConfig(filepath.Join(t.TempDir(), "does-not-exist.toml"))
 		assert.Error(t, err)
 		assert.Equal(t, defaultMonitorsConfig(), config.Monitors)
+	})
+
+	t.Run("vaccel stays disabled when the file does not mention it", func(t *testing.T) {
+		t.Parallel()
+		path := writeTestConfig(t, `
+[monitors.qemu]
+default_memory_mb = 512
+`)
+		config, err := LoadUruncConfig(path)
+		assert.NoError(t, err)
+		assert.False(t, config.Runtime.VAccel)
+	})
+
+	t.Run("vaccel can be enabled", func(t *testing.T) {
+		t.Parallel()
+		path := writeTestConfig(t, `
+[runtime]
+vAccel = true
+`)
+		config, err := LoadUruncConfig(path)
+		assert.NoError(t, err)
+		assert.True(t, config.Runtime.VAccel)
 	})
 
 	t.Run("partial extra binary section keeps default options", func(t *testing.T) {

@@ -696,6 +696,33 @@ func TestNewAnnotationsSanity(t *testing.T) {
 		}
 	})
 
+	// vAccel is a host feature. Unless the urunc configuration enables it, a
+	// container asking for it must not get created.
+	t.Run("vAccel annotations are refused when vAccel is disabled", func(t *testing.T) {
+		t.Parallel()
+		annots := validAnnots()
+		annots[annotVAccel] = "vsock"
+		annots[annotRPCAddress] = "vsock://2:2049"
+
+		_, err := New(writeBundle(t, annots), "test-container", t.TempDir(), defaultUruncConfig())
+		assert.Error(t, err, "Expected New to fail when vAccel is disabled")
+		assert.NotErrorIs(t, err, ErrNotUnikernel, "Expected a specific error instead of ErrNotUnikernel")
+		assert.ErrorContains(t, err, annotVAccel, "Expected error to mention the annotation")
+	})
+
+	t.Run("vAccel annotations are accepted when vAccel is enabled", func(t *testing.T) {
+		t.Parallel()
+		annots := validAnnots()
+		annots[annotVAccel] = "vsock"
+		annots[annotRPCAddress] = "vsock://2:2049"
+		cfg := defaultUruncConfig()
+		cfg.Runtime.VAccel = true
+
+		u, err := New(writeBundle(t, annots), "test-container", t.TempDir(), cfg)
+		assert.NoError(t, err, "Expected New to succeed when vAccel is enabled")
+		assert.Equal(t, "vsock://2:2049", u.State.Annotations[annotRPCAddress])
+	})
+
 	// A container without any urunc annotation is not a unikernel one and urunc
 	// needs to hand it over to runc.
 	t.Run("missing annotations fall back to runc", func(t *testing.T) {

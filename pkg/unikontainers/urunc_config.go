@@ -54,11 +54,15 @@ type UruncRuntime struct {
 	// Libcontainer selects whether the monitor's execution environment
 	// is set up through runc's libcontainer instead of urunc's own implementation.
 	Libcontainer bool `toml:"libcontainer"`
+	// VAccel is required to accept vAccel related annotations.
+	VAccel bool `toml:"vAccel"`
 }
 
-// libcontainerKey is the state.json annotation with the runtime setting
-// for libcontainer.
-const libcontainerKey = "urunc_config.runtime.libcontainer"
+// state.json annotation keys with the runtime settings.
+const (
+	libcontainerKey = "urunc_config.runtime.libcontainer"
+	vaccelKey       = "urunc_config.runtime.vAccel"
+)
 
 type UruncConfig struct {
 	Log        UruncLog                        `toml:"log"`
@@ -69,19 +73,25 @@ type UruncConfig struct {
 }
 
 // runtimeFromMap rebuilds the runtime options from the state.json annotations.
-// A missing or malformed value falls back to the default (libcontainer off).
+// A missing or malformed value falls back to the default (off).
 func runtimeFromMap(cfgMap map[string]string) UruncRuntime {
 	rt := defaultRuntimeConfig()
-	val, ok := cfgMap[libcontainerKey]
-	if !ok {
-		return rt
+	if val, ok := cfgMap[libcontainerKey]; ok {
+		choice, err := strconv.ParseBool(val)
+		if err != nil {
+			uniklog.Warnf("Invalid libcontainer value %q. Using default (false).", val)
+		} else {
+			rt.Libcontainer = choice
+		}
 	}
-	choice, err := strconv.ParseBool(val)
-	if err != nil {
-		uniklog.Warnf("Invalid libcontainer value %q. Using default (false).", val)
-		return rt
+	if val, ok := cfgMap[vaccelKey]; ok {
+		choice, err := strconv.ParseBool(val)
+		if err != nil {
+			uniklog.Warnf("Invalid vAccel value %q. Using default (false).", val)
+		} else {
+			rt.VAccel = choice
+		}
 	}
-	rt.Libcontainer = choice
 	return rt
 }
 
@@ -125,6 +135,7 @@ func defaultTimestampsConfig() UruncTimestamps {
 func defaultRuntimeConfig() UruncRuntime {
 	return UruncRuntime{
 		Libcontainer: false,
+		VAccel:       false,
 	}
 }
 
@@ -201,6 +212,7 @@ func (p *UruncConfig) Map() map[string]string {
 	cfgMap := make(map[string]string)
 
 	cfgMap[libcontainerKey] = strconv.FormatBool(p.Runtime.Libcontainer)
+	cfgMap[vaccelKey] = strconv.FormatBool(p.Runtime.VAccel)
 	for hv, hvCfg := range p.Monitors {
 		prefix := "urunc_config.monitors." + hv + "."
 		cfgMap[prefix+"default_memory_mb"] = strconv.FormatUint(uint64(hvCfg.DefaultMemoryMB), 10)

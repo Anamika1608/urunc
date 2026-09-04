@@ -20,6 +20,7 @@ The configuration file uses the [TOML](https://toml.io/) format and is organized
 ```toml
 [runtime]
 libcontainer = false
+vAccel = false
 
 [log]
 level = "info"
@@ -61,21 +62,37 @@ The `[runtime]` section controls runtime-wide behavior.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `libcontainer` | boolean | `false` | Use libcontainer to set up the monitor's execution environment |
+| `vAccel` | boolean | `false` | Enable the support of vAccel through the `com.urunc.unikernel.vAccel` and `com.urunc.unikernel.RPCAddress` annotations |
 
-> **⚠️ Experimental:** the use of `libcontainer` to prepare the monitor execution
-> environment is under active development. It is off by default.
-
-The value is resolved when the container is created and recorded in the
-container's `state.json`, so `start`, `kill` and `delete` keep using the mode
-the container was created with even if the configuration file changes in
-between.
+**Notes**:
+- the use of libcontainer to prepare the monitor execution environment is
+  **experimental** and under active development. It is off by default.
+- For the time being libcontianer-based setup does not support vAccel.
+- The use of vAccel is **experimental** and requires a **specific deployment
+  model**.
+- The vAccel annotations MUST always be set from the operator of the cluster
+  and in no case from user submitted images or pods.
+- Annotations related to vAccel in the pod description or the image MUST be
+  filtered out if they come from an untrusted source.
+- When vAccel is enabled, `urunc` exposes the vsock devices to the sandbox
+  monitor and, for Firecracker, makes only the vAccel agent's unix socket named
+  by `com.urunc.unikernel.RPCAddress` visible to the monitor (read-only, at a
+  fixed location inside the monitor's rootfs). The agent must already be
+  listening on that socket when the container is created. See the [vAccel
+  tutorial](tutorials/Running-vaccel-with-urunc.md) for the full setup.
 
 **Example:**
 
 ```toml
 [runtime]
 libcontainer = false
+vAccel = false
 ```
+
+The value is resolved when the container is created and recorded in the
+container's `state.json`, so `start`, `kill` and `delete` keep using the mode
+the container was created with even if the configuration file changes in
+between.
 
 ### Log Configuration
 

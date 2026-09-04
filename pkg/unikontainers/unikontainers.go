@@ -46,6 +46,7 @@ import (
 const (
 	monitorRootfsDirName     = constants.MonitorRootfsDirName
 	containerRootfsMountPath = constants.ContainerRootfsMountPath
+	vAccelMountPath          = constants.VAccelMountPath
 	// libcontainerDirName is the directory under urunc's root used from libcontainer
 	libcontainerDirName string = "libcontainer"
 )
@@ -98,6 +99,11 @@ func New(bundlePath string, containerID string, rootDir string, cfg *UruncConfig
 	err = config.validateValues()
 	if err != nil {
 		return nil, err
+	}
+	// vAccel should be explicitly enabled to accept vAccel annotations.
+	// Otherwise fail execution.
+	if config.VAccel != "" && !cfg.Runtime.VAccel {
+		return nil, fmt.Errorf("%s is set, but vAccel is disabled in the urunc configuration ([runtime] vAccel)", annotVAccel)
 	}
 
 	uniklog.Debugf("libcontainer runtime enabled: %t", cfg.Runtime.Libcontainer)
@@ -642,14 +648,12 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	metrics.Capture(m.TS17)
 
 	// vAccel setup
-	vAccelType, vsockSocketPath, rpcAddress, err := resolveVAccelConfig(u.State.Annotations[annotHypervisor], u.State.Annotations)
-	if err != nil {
-		if !errors.Is(err, ErrVAccelDisabled) {
-			uniklog.Warnf("vAccel misconfiguration: %v", err)
-		}
+	vAccelType, vAccelSocketPath, rpcAddress, err := resolveVAccelConfig(u.State.Annotations[annotHypervisor], u.State.Annotations)
+	if err != nil && !errors.Is(err, ErrVAccelDisabled) {
+		return fmt.Errorf("vAccel misconfiguration: %w", err)
 	}
 
-	if vAccelType == "vsock" && err == nil {
+	if vAccelType == "vsock" {
 		// Remove any existing VACCEL_RPC_ADDRESS and set the new value
 		for i, envVar := range unikernelParams.EnvVars {
 			if strings.HasPrefix(envVar, "VACCEL_RPC_ADDRESS"+"=") {
@@ -660,9 +664,9 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		unikernelParams.EnvVars = append(unikernelParams.EnvVars, "VACCEL_RPC_ADDRESS="+rpcAddress)
 
 		// Prepare the guest environment for vAccel vsock communication
-		vaccelDevices, err := prepareVSockEnvironment(rootfsParams.MonRootfs, u.State.Annotations[annotHypervisor], vsockSocketPath)
+		vaccelDevices, err := prepareVSockEnvironment(rootfsParams.MonRootfs, u.State.Annotations[annotHypervisor], vAccelSocketPath)
 		if err != nil {
-			uniklog.Debugf("failed to prepare get required vsock devices: %v", err)
+			return fmt.Errorf("failed to prepare the vsock environment: %w", err)
 		}
 		err = setupDevices(rootfsParams.MonRootfs, vaccelDevices, false)
 		if err != nil {
@@ -670,7 +674,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		}
 
 		vmmArgs.VAccelType = vAccelType
-		vmmArgs.VSockDevPath = vsockSocketPath
+		vmmArgs.VSockDevPath = vAccelMountPath
 		vmmArgs.VSockDevID = idToGuestCID(u.State.ID)
 	}
 

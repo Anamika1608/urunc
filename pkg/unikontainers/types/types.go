@@ -112,7 +112,7 @@ type ExecArgs struct {
 	UnikernelPath string   // The path of the unikernel inside rootfs
 	InitrdPath    string   // The path to the initrd of the unikernel
 	VAccelType    string   // Specifies the vAccel acceleration type(e.g. vsock). When empty, vAccel is disabled
-	VSockDevPath  string   // The host directory where the fc unix socket is created
+	VSockDevPath  string   // The directory inside the monitor rootfs with the vAccel unix sockets
 	VSockDevID    int      // The guest-cid
 	Net           NetDevParams
 	Sharedfs      SharedfsParams
