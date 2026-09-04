@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/hypervisors"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
@@ -55,7 +56,12 @@ func (s sharedfsRootfs) getMounts() ([]specs.Mount, error) {
 
 	tmpfsSize := chooseTmpfsSize(s.sfsType, s.memory)
 	mounts = append(mounts, tmpfsMount("/tmp", tmpfsSize))
-	mounts = append(mounts, filterBindMounts(s.mounts)...)
+
+	bindMounts, err := filterBindMounts(s.mountedPath, s.mounts)
+	if err != nil {
+		return nil, err
+	}
+	mounts = append(mounts, bindMounts...)
 
 	return mounts, nil
 }
@@ -112,7 +118,7 @@ func chooseTmpfsSize(sfsType string, mem uint64) string {
 // filterBindMounts filters the mounts form the container's spec keeping only the
 // bind mounts and adjusts the Destination path to the mountpoint of the
 // container's rootfs inside the monitor rootfs.
-func filterBindMounts(mounts []specs.Mount) []specs.Mount {
+func filterBindMounts(containerRootfs string, mounts []specs.Mount) ([]specs.Mount, error) {
 	var result []specs.Mount
 	for _, m := range mounts {
 		// Skip non-bind mounts
@@ -120,13 +126,26 @@ func filterBindMounts(mounts []specs.Mount) []specs.Mount {
 		if m.Type != "bind" {
 			continue
 		}
+
+		// Resolve the destination against the real container rootfs,
+		// and then re-root the resolved path under the container
+		// rootfs mount inside the monitor rootfs, where the mount is
+		// actually applied.
+		resolved, err := securejoin.SecureJoin(containerRootfs, m.Destination)
+		if err != nil {
+			return nil, err
+		}
+		rel, err := filepath.Rel(containerRootfs, resolved)
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, specs.Mount{
 			Type:        "bind",
 			Source:      m.Source,
-			Destination: filepath.Join(containerRootfsMountPath, m.Destination),
+			Destination: filepath.Join(containerRootfsMountPath, rel),
 			Options:     m.Options,
 		})
 	}
 
-	return result
+	return result, nil
 }

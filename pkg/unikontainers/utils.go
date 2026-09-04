@@ -116,11 +116,9 @@ func copyFile(sourceFile string, targetPath string) error {
 	return nil
 }
 
-// move sourceFile to targetDir
-// creates targetDir and all necessary parent directories
-func moveFile(sourceFile string, targetDir string) error {
-	_, filename := filepath.Split(sourceFile)
-	targetPath := filepath.Join(targetDir, filename)
+// moveFile moves sourceFile to targetPath creating any missing parent
+// directories, and removes the source afterwards.
+func moveFile(sourceFile string, targetPath string) error {
 	err := copyFile(sourceFile, targetPath)
 	if err != nil {
 		return err

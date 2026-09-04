@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/sirupsen/logrus"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/hypervisors"
@@ -140,11 +141,12 @@ func GetUnikernelConfig(bundleDir string, spec *specs.Spec) (*UnikernelConfig, e
 	// Failed to fetch urunc annotations from spec, fallback to urunc.json
 	uniklog.Info("failed to fetch urunc annotations from spec, fallback to urunc.json")
 	rootFSDir := spec.Root.Path
-	var jsonFilePath string
-	if filepath.IsAbs(rootFSDir) {
-		jsonFilePath = filepath.Join(rootFSDir, uruncJSONFilename)
-	} else {
-		jsonFilePath = filepath.Join(bundleDir, rootFSDir, uruncJSONFilename)
+	if !filepath.IsAbs(rootFSDir) {
+		rootFSDir = filepath.Join(bundleDir, rootFSDir)
+	}
+	jsonFilePath, err := securejoin.SecureJoin(rootFSDir, uruncJSONFilename)
+	if err != nil {
+		return nil, err
 	}
 
 	jsonConf, err := getConfigFromJSON(jsonFilePath)

@@ -63,8 +63,9 @@ func TestInitrdRootfsPostSetupSelectsUpdateByGuestType(t *testing.T) {
 			source := filepath.Join(dir, "mounted")
 			require.NoError(t, os.WriteFile(source, []byte("new"), 0o600))
 			rfs := initrdRootfs{
-				initrdHostFullPath: archivePath,
-				guestType:          tt.guestType,
+				mountedPath: dir,
+				initrdPath:  "initrd.cpio",
+				guestType:   tt.guestType,
 				mounts: []specs.Mount{
 					{Type: "bind", Source: source, Destination: "/mounted"},
 				},

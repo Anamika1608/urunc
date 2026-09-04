@@ -152,14 +152,14 @@ func TestMoveFile(t *testing.T) {
 
 		// Create a temporary target directory
 		targetDir := t.TempDir()
+		_, filename := filepath.Split(srcFile.Name())
+		movedFilePath := filepath.Join(targetDir, filename)
 
 		// Call the function
-		err = moveFile(srcFile.Name(), targetDir)
+		err = moveFile(srcFile.Name(), movedFilePath)
 		assert.NoError(t, err, "Expected no error in moving file")
 
 		// Verify the file was moved
-		_, filename := filepath.Split(srcFile.Name())
-		movedFilePath := filepath.Join(targetDir, filename)
 		movedContent, err := os.ReadFile(movedFilePath)
 		assert.NoError(t, err, "Expected no error in reading moved file")
 		assert.Equal(t, content, string(movedContent), "Expected moved content to match original")
@@ -175,7 +175,7 @@ func TestMoveFile(t *testing.T) {
 		targetDir := t.TempDir()
 
 		// Call the function with a non-existent source file
-		err := moveFile("nonexistent.txt", targetDir)
+		err := moveFile("nonexistent.txt", filepath.Join(targetDir, "out.txt"))
 		assert.Error(t, err, "Expected an error for non-existent source file")
 	})
 
@@ -192,11 +192,11 @@ func TestMoveFile(t *testing.T) {
 		assert.NoError(t, err)
 		srcFile.Close()
 
-		// Use a target directory path that cannot be created
-		targetDir := filepath.Join(string(filepath.Separator), "invalid", "path")
+		// Use a target path whose parent directory cannot be created
+		targetPath := filepath.Join(string(filepath.Separator), "invalid", "path", "file.txt")
 
 		// Call the function
-		err = moveFile(srcFile.Name(), targetDir)
+		err = moveFile(srcFile.Name(), targetPath)
 		assert.Error(t, err, "Expected an error for invalid target directory path")
 
 		// Verify the source file still exists
@@ -226,7 +226,7 @@ func TestMoveFile(t *testing.T) {
 		targetFile.Close()
 
 		// Call the function
-		err = moveFile(srcFile.Name(), targetDir)
+		err = moveFile(srcFile.Name(), targetFilePath)
 		assert.Error(t, err, "Expected an error for read-only target file")
 
 		// Verify the source file still exists

@@ -17,11 +17,11 @@ package unikernels
 import (
 	"fmt"
 	"net"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/urunc-dev/urunc/internal/constants"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/initrd"
 	"github.com/urunc-dev/urunc/pkg/unikontainers/types"
@@ -286,7 +286,11 @@ func (l *Linux) setupUrunitConfig(rfs types.RootfsParams) error {
 
 	var err error
 	if l.RootFsType == "initrd" {
-		initrdToUpdate := filepath.Join(constants.ContainerRootfsMountPath, rfs.Path)
+		var initrdToUpdate string
+		initrdToUpdate, err = securejoin.SecureJoin(constants.ContainerRootfsMountPath, rfs.Path)
+		if err != nil {
+			return fmt.Errorf("failed to setup urunit config: %w", err)
+		}
 		err = initrd.AddFileToInitrd(initrdToUpdate, urunitConfig, urunitConfPath)
 	} else {
 		err = createFile(urunitConfPath, urunitConfig)

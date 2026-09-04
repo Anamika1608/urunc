@@ -61,6 +61,9 @@ type BlockDevParams struct {
 	HostMountPoint string
 	LoopAutoclear  bool
 	MountOptions   string
+	// IsExplicit marks a Source that is a path inside the container's image
+	// rootfs (an explicit block image)
+	IsExplicit bool
 }
 
 type SharedfsParams struct {

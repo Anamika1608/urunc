@@ -37,6 +37,7 @@ import (
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/sirupsen/logrus"
 	m "github.com/urunc-dev/urunc/internal/metrics"
@@ -442,10 +443,10 @@ func (u *Unikontainer) newRootfsBuilder(containerRootfs string, rootfsParams typ
 		}
 	case "initrd":
 		return initrdRootfs{
-			mounts:             u.Spec.Mounts,
-			mountedPath:        rootfsParams.MountedPath,
-			initrdHostFullPath: filepath.Join(rootfsParams.MountedPath, rootfsParams.Path),
-			guestType:          u.State.Annotations[annotType],
+			mounts:      u.Spec.Mounts,
+			mountedPath: rootfsParams.MountedPath,
+			initrdPath:  rootfsParams.Path,
+			guestType:   u.State.Annotations[annotType],
 		}
 	case "virtiofs", "9pfs":
 		return sharedfsRootfs{
@@ -536,22 +537,6 @@ func (u *Unikontainer) buildMonitorSpec(rootfsParams types.RootfsParams, monRes 
 		Block:      monRes.BlockArgs,
 	}
 
-	// For an explicit block image the rootfs block lives inside the container's
-	// rootfs, which is bind-mounted at containerRootfsMountPath. Adjust its path
-	// like the other boot files so the monitor reaches it through the bind mount.
-	if rootfsParams.Type == "block" && rootfsParams.MountedPath == "" {
-		for i := range guest.Block {
-			if guest.Block[i].ID == "rootfs" {
-				guest.Block[i].Source = confineToContainerRootfs(guest.Block[i].Source)
-			}
-		}
-	}
-
-	// Update the paths of the files we need to pass in the monitor process. Every
-	// rootfs type keeps its boot files under containerRootfsMountPath in the
-	// monitor rootfs
-	vmmArgs.UnikernelPath = confineToContainerRootfs(vmmArgs.UnikernelPath)
-	vmmArgs.InitrdPath = confineToContainerRootfs(vmmArgs.InitrdPath)
 	vmmArgs.Sharedfs = monRes.Sharedfs
 
 	mSpec.ContainerID = u.State.ID
@@ -702,6 +687,24 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 		return err
 	}
 
+	// Every rootfs type keeps its boot files under the mount of
+	// containerRootfsMountPath, so SecureJoin resolves the image's
+	// symlinks against the container's image rootfs. This must run after
+	// the pivot and before unikernel.Init/BuildExecCmd, the only consumers
+	// of these paths.
+	vmmArgs.UnikernelPath, err = confineToContainerRootfs(vmmArgs.UnikernelPath)
+	if err != nil {
+		return err
+	}
+	vmmArgs.InitrdPath, err = confineToContainerRootfs(vmmArgs.InitrdPath)
+	if err != nil {
+		return err
+	}
+	unikernelParams.Block, err = confineBlockSources(unikernelParams.Block)
+	if err != nil {
+		return err
+	}
+
 	// unikernel
 	// Initialize the unikernel after the pivot so that any file setup it performs
 	// (e.g. writing the urunit config into the initrd) operates within the monitor
@@ -753,14 +756,29 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 }
 
 // confineToContainerRootfs ensures an image-controlled path stays under the
-// container rootfs mount at containerRootfsMountPath. An empty path is
-// returned unchanged.
-func confineToContainerRootfs(path string) string {
-	if path != "" {
-		return filepath.Join(containerRootfsMountPath, path)
+// container rootfs mount at containerRootfsMountPath using secureJoin.  It
+// must run after the pivot into the monitor rootfs, when the mount exists. An
+// empty path is returned unchanged.
+func confineToContainerRootfs(path string) (string, error) {
+	if path == "" {
+		return "", nil
 	}
 
-	return path
+	confined, err := securejoin.SecureJoin(containerRootfsMountPath, path)
+	if err != nil {
+		return "", err
+	}
+
+	// SecureJoin dereferences symlinks whose targets come from the untrusted
+	// container image and can reintroduce characters that validateValues
+	// rejected at create time (e.g. "," or "="). Since the confined path is
+	// later interpolated unescaped into comma-separated monitor options (e.g.
+	// the qemu -drive string), re-validate the resolved path.
+	if !allowedPathRe.MatchString(confined) {
+		return "", fmt.Errorf("confined path %q must match %s", confined, allowedPathRe.String())
+	}
+
+	return confined, nil
 }
 
 // buildUnikernelCommand initializes the unikernel with the collected parameters
@@ -775,6 +793,26 @@ func buildUnikernelCommand(unikernel types.Unikernel, params types.UnikernelPara
 	}
 
 	return unikernel.CommandString()
+}
+
+// confineBlockSources confines the source paths of block images whose source
+// lives inside the container's image rootfs under containerRootfsMountPath
+// (BlockDevParams.IsExplicit). Real host block devices (the container rootfs
+// converted to a block device, or block volumes from mounts) keep their
+// absolute device paths. It must run after the pivot into the monitor rootfs,
+// when the mount exists for SecureJoin to resolve the image's symlinks.
+func confineBlockSources(blocks []types.BlockDevParams) ([]types.BlockDevParams, error) {
+	var err error
+	for i := range blocks {
+		if blocks[i].IsExplicit {
+			blocks[i].Source, err = confineToContainerRootfs(blocks[i].Source)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return blocks, nil
 }
 
 // execMonitor runs the monitor's pre-exec setup and finally execve's the monitor.

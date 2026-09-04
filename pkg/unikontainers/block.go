@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/moby/sys/mountinfo"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/sirupsen/logrus"
@@ -130,28 +131,47 @@ func getMountInfo(path string) (types.BlockDevParams, error) {
 // FIXME: This approach fills up /run with unikernel binaries, initrds and urunc.json
 // files for each unikernel we run
 func extractBootFiles(rootfsPath string, newRootfsPath string, unikernel string, uruncJSON string, initrd string) error {
-	currentUnikernelPath := filepath.Join(rootfsPath, unikernel)
-	targetUnikernelPath := filepath.Join(newRootfsPath, unikernel)
-	targetUnikernelDir, _ := filepath.Split(targetUnikernelPath)
-	err := moveFile(currentUnikernelPath, targetUnikernelDir)
+	// Resolve every boot file both in the source rootfs and in the new rootfs
+	// with SecureJoin.
+	currentUnikernelPath, err := securejoin.SecureJoin(rootfsPath, unikernel)
+	if err != nil {
+		return err
+	}
+	targetUnikernelPath, err := securejoin.SecureJoin(newRootfsPath, unikernel)
+	if err != nil {
+		return err
+	}
+	err = moveFile(currentUnikernelPath, targetUnikernelPath)
 	if err != nil {
 		return fmt.Errorf("could not move %s to %s: %w", currentUnikernelPath, targetUnikernelPath, err)
 	}
 
 	if initrd != "" {
-		currentInitrdPath := filepath.Join(rootfsPath, initrd)
-		targetInitrdPath := filepath.Join(newRootfsPath, initrd)
-		targetInitrdDir, _ := filepath.Split(targetInitrdPath)
-		err = moveFile(currentInitrdPath, targetInitrdDir)
+		currentInitrdPath, err := securejoin.SecureJoin(rootfsPath, initrd)
+		if err != nil {
+			return err
+		}
+		targetInitrdPath, err := securejoin.SecureJoin(newRootfsPath, initrd)
+		if err != nil {
+			return err
+		}
+		err = moveFile(currentInitrdPath, targetInitrdPath)
 		if err != nil {
 			return fmt.Errorf("could not move %s to %s: %w", currentInitrdPath, targetInitrdPath, err)
 		}
 	}
 
-	currentConfigPath := filepath.Join(rootfsPath, uruncJSON)
-	err = moveFile(currentConfigPath, newRootfsPath)
+	currentConfigPath, err := securejoin.SecureJoin(rootfsPath, uruncJSON)
 	if err != nil {
-		return fmt.Errorf("could not move %s to %s: %w", currentConfigPath, newRootfsPath, err)
+		return err
+	}
+	targetConfigPath, err := securejoin.SecureJoin(newRootfsPath, uruncJSON)
+	if err != nil {
+		return err
+	}
+	err = moveFile(currentConfigPath, targetConfigPath)
+	if err != nil {
+		return fmt.Errorf("could not move %s to %s: %w", currentConfigPath, targetConfigPath, err)
 	}
 
 	return nil
@@ -189,6 +209,7 @@ func handleExplicitBlockImage(blockImg string, mountPoint string) (types.BlockDe
 		Source:     blockImg,
 		MountPoint: mountPoint,
 		ID:         id,
+		IsExplicit: true,
 	}, nil
 }
 
@@ -239,6 +260,7 @@ func getBlockVolumes(mounts []specs.Mount, ukernel types.Unikernel) ([]types.Blo
 			mInfo.ID = fmt.Sprintf("vol%d", i)
 			mInfo.HostMountPoint = mInfo.MountPoint
 			mInfo.MountPoint = m.Destination
+			mInfo.IsExplicit = false
 			blkImgs = append(blkImgs, mInfo)
 		}
 	}
@@ -413,6 +435,9 @@ func (b blockRootfs) getBlockDevs() ([]types.BlockDevParams, error) {
 		Source:     b.path,
 		MountPoint: "/",
 		ID:         "rootfs",
+		// An empty mountedPath means that the block image was not mounted
+		// and therefore it is an explicit image inside the container's rootfs
+		IsExplicit: b.mountedPath == "",
 	}
 
 	// NOTE: Rumprun does not allow us to mount
