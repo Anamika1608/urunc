@@ -26,6 +26,28 @@ import (
 // annotation is absent. This is an expected condition, not a misconfiguration.
 var ErrVAccelDisabled = errors.New("vaccel is disabled")
 
+// The vAccel RPC address ends up both in the guest's cmdline and, in the case
+// of firecracker, in a bind mount of a host directory. Therefore, we accept
+// only the very specific patterns below.
+const (
+	// vAccelPortRe matches a port number (1-65535), without leading zeros.
+	vAccelPortRe = `(?:[1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])`
+
+	// vAccelSockDirRe matches the host directory of the vAccel unix socket.
+	// Since we bind mount that directory in the monitor's rootfs, we allow
+	// only plain absolute paths, without dots, whitespace or shell
+	// metacharacters. As a result, "." and ".." can not appear as a path
+	// element and the path can neither be relative nor have a trailing slash.
+	vAccelSockDirRe = `(?:/[A-Za-z0-9_-]+)+`
+)
+
+// vAccelAddressRe maps a monitor to the format that it expects the vAccel RPC
+// address to have. A monitor which is not in the map does not support vAccel.
+var vAccelAddressRe = map[string]*regexp.Regexp{
+	"qemu":        regexp.MustCompile(`^vsock://2:` + vAccelPortRe + `$`),
+	"firecracker": regexp.MustCompile(`^unix://(` + vAccelSockDirRe + `)/vaccel\.sock_(` + vAccelPortRe + `)$`),
+}
+
 // idToGuestCID generates a deterministic guest CID (Context Identifier)
 // for vsock communication based on a container or VM ID.
 func idToGuestCID(id string) int {
@@ -47,30 +69,24 @@ func idToGuestCID(id string) int {
 // corresponding vsock address, and returns the directory path of the
 // unix socket, which must later be bind-mounted into the guest rootfs.
 func isValidVSockAddress(rpcAddress *string, hypervisor string) (bool, string, error) {
-	var regex *regexp.Regexp
-
-	switch hypervisor {
-	case "qemu":
-		regex = regexp.MustCompile(`^vsock://2:\d+$`)
-	case "firecracker":
-		regex = regexp.MustCompile(`^unix://(.*)/vaccel\.sock_(\d+)$`)
-	default:
+	regex, exists := vAccelAddressRe[hypervisor]
+	if !exists {
 		return false, "", fmt.Errorf("unsupported hypervisor: %q", hypervisor)
 	}
 
-	if regex.MatchString(*rpcAddress) {
-		if hypervisor == "firecracker" {
-			matches := regex.FindStringSubmatch(*rpcAddress)
-			if matches == nil {
-				return false, "", fmt.Errorf("failed to parse rpc address %q for %s", *rpcAddress, hypervisor)
-			}
-
-			*rpcAddress = "vsock://2:" + matches[2]
-			return true, matches[1], nil
-		}
-		return true, "", nil
+	if !regex.MatchString(*rpcAddress) {
+		return false, "", fmt.Errorf("rpc address %q does not match the expected format for %s", *rpcAddress, hypervisor)
 	}
-	return false, "", fmt.Errorf("rpc address %q does not match the expected format for %s", *rpcAddress, hypervisor)
+
+	if hypervisor == "firecracker" {
+		// The address matched, hence the groups of the regex are present.
+		matches := regex.FindStringSubmatch(*rpcAddress)
+		*rpcAddress = "vsock://2:" + matches[2]
+
+		return true, matches[1], nil
+	}
+
+	return true, "", nil
 }
 
 // resolveVAccelConfig parses and validates vAccel-related annotations,
@@ -83,9 +99,9 @@ func resolveVAccelConfig(hypervisor string, annotations map[string]string) (stri
 	var success bool
 	var vsockSocketPath string
 
-	address := annotations["com.urunc.unikernel.RPCAddress"]
+	address := annotations[annotRPCAddress]
 
-	vAccelType, exists := annotations["com.urunc.unikernel.vAccel"]
+	vAccelType, exists := annotations[annotVAccel]
 	if exists {
 		if address == "" {
 			err = fmt.Errorf("vaccel is enabled, but rpc address is not set")

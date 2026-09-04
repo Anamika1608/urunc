@@ -51,7 +51,6 @@ const (
 var uniklog = logrus.WithField("subsystem", "unikontainers")
 
 var ErrQueueProxy = errors.New("this a queue proxy container")
-var ErrNotUnikernel = errors.New("this is not a unikernel container")
 var ErrNotExistingNS = errors.New("the namespace does not exist")
 
 // Unikontainer holds the data necessary to create, manage and delete unikernel containers
@@ -79,8 +78,8 @@ func New(bundlePath string, containerID string, rootDir string, cfg *UruncConfig
 		return nil, fmt.Errorf("invalid OCI spec: linux section is required")
 	}
 
-	containerName := spec.Annotations["io.kubernetes.cri.container-name"]
-	if containerName == "queue-proxy" {
+	containerName := spec.Annotations[annotCRICntrName]
+	if containerName == criQueueProxyCntr {
 		uniklog.Warn("This is a queue-proxy container. Adding IP env.")
 		configFile := filepath.Join(bundlePath, configFilename)
 		err = handleQueueProxy(*spec, configFile)
@@ -92,7 +91,11 @@ func New(bundlePath string, containerID string, rootDir string, cfg *UruncConfig
 
 	config, err := GetUnikernelConfig(bundlePath, spec)
 	if err != nil {
-		return nil, ErrNotUnikernel
+		return nil, err
+	}
+	err = config.validateValues()
+	if err != nil {
+		return nil, err
 	}
 
 	uniklog.Debugf("libcontainer runtime enabled: %t", cfg.Runtime.Libcontainer)
@@ -100,6 +103,7 @@ func New(bundlePath string, containerID string, rootDir string, cfg *UruncConfig
 	confMap := config.Map()
 
 	maps.Copy(confMap, cfg.Map())
+
 	containerDir := filepath.Join(rootDir, containerID)
 	state := &specs.State{
 		Version:     spec.Version,
@@ -632,7 +636,7 @@ func (u *Unikontainer) Exec(metrics m.Writer) error {
 	metrics.Capture(m.TS17)
 
 	// vAccel setup
-	vAccelType, vsockSocketPath, rpcAddress, err := resolveVAccelConfig(u.State.Annotations[annotHypervisor], u.Spec.Annotations)
+	vAccelType, vsockSocketPath, rpcAddress, err := resolveVAccelConfig(u.State.Annotations[annotHypervisor], u.State.Annotations)
 	if err != nil {
 		if !errors.Is(err, ErrVAccelDisabled) {
 			uniklog.Warnf("vAccel misconfiguration: %v", err)
@@ -962,6 +966,9 @@ func (u *Unikontainer) saveContainerState() error {
 	// Propagate all annotations from spec to state to solve nerdctl hooks errors.
 	// For more info: https://github.com/containerd/nerdctl/issues/133
 	for key, value := range u.Spec.Annotations {
+		if strings.HasPrefix(key, annotUruncPrefix) {
+			continue
+		}
 		if _, ok := u.State.Annotations[key]; !ok {
 			u.State.Annotations[key] = value
 		}
@@ -1439,7 +1446,7 @@ func (u *Unikontainer) isRunning() bool {
 
 // getNetworkType checks if current container is a knative user-container
 func (u Unikontainer) getNetworkType() string {
-	if u.Spec.Annotations["io.kubernetes.cri.container-name"] == "user-container" {
+	if u.Spec.Annotations[annotCRICntrName] == criUserCntr {
 		return "static"
 	}
 	return "dynamic"
