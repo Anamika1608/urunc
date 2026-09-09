@@ -1,0 +1,20 @@
+pkg/unikontainers/hypervisors/firecracker.go
+  s_86cde912cbeb1e::t_5287d55e3ce94c 227,343,375,378,380,384,393-394
+  s_86cde912cbeb1e::t_084b202c6cc9f1 331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "046b72763a615f3fe292c54c8c14cf10b32b7908",
+  "prompts": {},
+  "sessions": {
+    "s_86cde912cbeb1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "359174d0-0339-4465-8790-b21099b4e947",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}

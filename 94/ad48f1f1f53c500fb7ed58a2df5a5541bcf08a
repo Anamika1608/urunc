@@ -1,0 +1,24 @@
+pkg/unikontainers/hypervisors/firecracker_client.go
+  s_86cde912cbeb1e::t_9b07c0c70a8d3e 1-24,26-28,41-43,47-48,52,54,81-82,88-92,96-98,100-106,122,126,144-147,150-170,32,44,66-67,111-112,117-118,132-133,138,140-141
+  s_86cde912cbeb1e::t_5287d55e3ce94c 25,45-46,53,55,60-62,64-65,71-77,79-80,87,93-95,109-110,113-116,120-121,130-131,135-137,139
+pkg/unikontainers/unikontainers.go
+  s_86cde912cbeb1e::t_863fe963a09ffb 527,532
+pkg/unikontainers/hypervisors/firecracker.go
+  s_86cde912cbeb1e::t_5287d55e3ce94c 230,355,387,390,392,396,405-406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "94ad48f1f1f53c500fb7ed58a2df5a5541bcf08a",
+  "prompts": {},
+  "sessions": {
+    "s_86cde912cbeb1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "359174d0-0339-4465-8790-b21099b4e947",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
