@@ -1,0 +1,21 @@
+pkg/unikontainers/hypervisors/qemu_qmp_client.go
+  s_86cde912cbeb1e::t_57bd08d2d78976 1-24,29-33,38-69,71-113
+pkg/unikontainers/hypervisors/qemu.go
+  s_86cde912cbeb1e::t_eb873e6ee3d3e8 18,20-22,25-26,180-181,185-189,196-203,206-238,240-247,256-285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9abacf6452b6eed1110d04b1da6e7282a324439f",
+  "prompts": {},
+  "sessions": {
+    "s_86cde912cbeb1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "359174d0-0339-4465-8790-b21099b4e947",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
