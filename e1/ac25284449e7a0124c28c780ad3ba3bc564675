@@ -1,0 +1,24 @@
+pkg/unikontainers/unikontainers.go
+  s_ddebb8296f398a::t_989eaea890a112 885,891-893,745-746,966,977-978,986-987
+  s_ddebb8296f398a::t_e5fec485af298f 886
+  s_ddebb8296f398a::t_4127e16c0f1f9a 744,985
+  s_ddebb8296f398a::t_7ed4427b468b23 976
+pkg/unikontainers/hypervisors/cloud_hypervisor.go
+  s_ddebb8296f398a::t_bcb32d1fb52e0f 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e1ac25284449e7a0124c28c780ad3ba3bc564675",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+pkg/unikontainers/unikontainers.go
+  s_ddebb8296f398a::t_989eaea890a112 885,934-936,745-746,1019-1020,1031-1032,909,916-917,920,923,929,944-945,1021,1025
+  s_ddebb8296f398a::t_e5fec485af298f 886
+  s_ddebb8296f398a::t_4127e16c0f1f9a 744,906,915,943
+  s_ddebb8296f398a::t_7ed4427b468b23 1018,912
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7716b76adb8733b21562c8799598712a15495055",
+  "prompts": {},
+  "sessions": {
+    "s_ddebb8296f398a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f989aa28-aa82-49cf-904a-f3f2e4be0e5d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Anamika Aggarwal <anamikaagg18@gmail.com>"
+    }
+  }
+}
