@@ -1,0 +1,21 @@
+pkg/unikontainers/hypervisors/cloud_hypervisor_session_test.go
+  s_86cde912cbeb1e::t_bce7644b43d06f 183
+pkg/unikontainers/hypervisors/cloud_hypervisor_client.go
+  s_86cde912cbeb1e::t_73bfa069cb0980 1-28,36-55,59-70,74-93,95-98,100-103,107-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c1ea339902c17541143b69fb9046d3e602e5b5cf",
+  "prompts": {},
+  "sessions": {
+    "s_86cde912cbeb1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "359174d0-0339-4465-8790-b21099b4e947",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
